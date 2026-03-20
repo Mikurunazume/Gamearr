@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Loader2, FolderOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Switch } from "@/components/ui/switch";
 import { FileBrowser } from "./FileBrowser";
 
 interface ImportReviewModalProps {
@@ -46,6 +47,7 @@ export default function ImportReviewModal({
   const [transferMode, setTransferMode] = useState<"move" | "copy" | "hardlink" | "symlink">(
     "move"
   );
+  const [unpackArchive, setUnpackArchive] = useState(false);
   const [isFileBrowserOpen, setIsFileBrowserOpen] = useState(false);
 
   // Reset state on open
@@ -54,6 +56,7 @@ export default function ImportReviewModal({
       setStrategy("pc");
       setDestinationPath("");
       setTransferMode("move");
+      setUnpackArchive(false);
     }
   }, [open, downloadId]);
 
@@ -64,6 +67,7 @@ export default function ImportReviewModal({
         proposedPath: destinationPath,
         originalPath: "", // Backend will resolve it
         transferMode,
+        unpack: unpackArchive,
       });
     },
     onSuccess: () => {
@@ -150,6 +154,16 @@ export default function ImportReviewModal({
                 <SelectItem value="symlink">Symlink</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label>Unpack Archive</Label>
+              <p className="text-xs text-muted-foreground">
+                Extract .zip, .rar, .7z before placing files.
+              </p>
+            </div>
+            <Switch checked={unpackArchive} onCheckedChange={setUnpackArchive} />
           </div>
         </div>
 

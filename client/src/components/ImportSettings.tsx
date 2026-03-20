@@ -207,6 +207,9 @@ export default function ImportSettings() {
       queryClient.invalidateQueries({ queryKey: ["/api/imports/romm"] });
       queryClient.invalidateQueries({ queryKey: ["/api/imports/hardlink/check"] });
     },
+    onError: (error: Error) => {
+      toast({ title: "Save Failed", description: error.message, variant: "destructive" });
+    },
   });
 
   if (configLoading || rommLoading) {
@@ -282,18 +285,6 @@ export default function ImportSettings() {
                     <div className="space-y-4 mb-6">
                       <div className="flex items-center justify-between">
                         <div className="space-y-0.5">
-                          <Label>Auto-Unpack Archives</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Extract .zip, .rar, .7z after download.
-                          </p>
-                        </div>
-                        <Switch
-                          checked={localConfig.autoUnpack}
-                          onCheckedChange={(c) => setLocalConfig({ ...localConfig, autoUnpack: c })}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
                           <Label>Overwrite Existing Files</Label>
                           <p className="text-xs text-muted-foreground">
                             Replace files already present at the destination.
@@ -325,7 +316,8 @@ export default function ImportSettings() {
                           }
                         />
                         <p className="text-xs text-muted-foreground">
-                          Default destination root for imported files.
+                          Where files are placed after import — used for PC games and any download
+                          not handled by the RomM provider.
                         </p>
                       </div>
                       <div className="space-y-1.5">
@@ -519,8 +511,9 @@ export default function ImportSettings() {
                           }
                         />
                         <p className="text-xs text-muted-foreground">
-                          Base path where platform subfolders (or binding-map paths) will be
-                          created.
+                          Path to your RomM <code>library/roms/</code> folder. Platform subfolders
+                          (e.g. <code>ngc/</code>, <code>ps2/</code>) are created here. This is
+                          separate from the General Config library root, which is used for PC games.
                         </p>
                       </div>
                     </div>
