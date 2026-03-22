@@ -6,6 +6,8 @@ const { fsMock } = vi.hoisted(() => ({
     move: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),
     pathExists: vi.fn().mockResolvedValue(false),
+    stat: vi.fn().mockResolvedValue({ isDirectory: () => false }),
+    readdir: vi.fn().mockResolvedValue([]),
   },
 }));
 

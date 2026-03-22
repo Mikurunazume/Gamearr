@@ -130,7 +130,7 @@ describe("checkDownloadStatus", () => {
     expect(mockNotifyUser).toHaveBeenCalledWith("notification", { id: "notif-1" });
   });
 
-  it("falls back to completed/owned when completed download has no path details", async () => {
+  it("flags download as manual_review_required when completed download has no path details", async () => {
     const { checkDownloadStatus } = await import("../cron.js");
 
     mockStorage.getDownloadingGameDownloads.mockResolvedValue([
@@ -157,7 +157,10 @@ describe("checkDownloadStatus", () => {
     await checkDownloadStatus();
 
     expect(mockImportManager.processImport).not.toHaveBeenCalled();
-    expect(mockStorage.updateGameDownloadStatus).toHaveBeenCalledWith("gd-2", "completed");
-    expect(mockStorage.updateGameStatus).toHaveBeenCalledWith("game-2", { status: "owned" });
+    expect(mockStorage.updateGameDownloadStatus).toHaveBeenCalledWith(
+      "gd-2",
+      "manual_review_required"
+    );
+    expect(mockStorage.updateGameStatus).not.toHaveBeenCalled();
   });
 });
