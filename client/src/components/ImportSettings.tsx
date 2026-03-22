@@ -20,7 +20,6 @@ import { Loader2, Plus, X, Info } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { ImportConfig, RomMConfig, RomMConfigInput } from "@shared/schema";
 import { PathMappingSettings } from "./PathMappingSettings";
-import { PlatformMappingSettings } from "./PlatformMappingSettings";
 
 type IgdbPlatform = { id: number; name: string };
 type AppConfig = { igdb?: { configured?: boolean } };
@@ -154,8 +153,10 @@ export default function ImportSettings() {
   const [localConfig, setLocalConfig] = useState<ImportConfig | null>(null);
   const [localRomm, setLocalRomm] = useState<RomMConfigInput | null>(null);
   const [bindingEntries, setBindingEntries] = useState<KVEntry[]>([]);
-  const [aliasEntries, setAliasEntries] = useState<KVEntry[]>([]);
   const [platformSearch, setPlatformSearch] = useState("");
+  const [simpleMode, setSimpleMode] = useState(
+    () => localStorage.getItem("questarr.rommSimpleMode") !== "false"
+  );
 
   useEffect(() => {
     if (config) setLocalConfig(config);
@@ -164,25 +165,21 @@ export default function ImportSettings() {
   useEffect(() => {
     if (rommConfig) {
       const bindings = rommConfig.platformBindings || {};
-      const aliases = rommConfig.platformAliases || {};
       setLocalRomm({
         ...rommConfig,
         libraryRoot: rommConfig.libraryRoot || "/data",
         platformRoutingMode: rommConfig.platformRoutingMode || "slug-subfolder",
         platformBindings: bindings,
-        platformAliases: aliases,
-        moveMode: rommConfig.moveMode || "hardlink",
+        moveMode: rommConfig.moveMode || "move",
         conflictPolicy: rommConfig.conflictPolicy || "rename",
         folderNamingTemplate: rommConfig.folderNamingTemplate || "{title}",
         singleFilePlacement: rommConfig.singleFilePlacement || "root",
         multiFilePlacement: "subfolder",
         includeRegionLanguageTags: !!rommConfig.includeRegionLanguageTags,
         allowedSlugs: rommConfig.allowedSlugs,
-        allowAbsoluteBindings: !!rommConfig.allowAbsoluteBindings,
         bindingMissingBehavior: rommConfig.bindingMissingBehavior || "fallback",
       });
       setBindingEntries(recordToEntries(bindings));
-      setAliasEntries(recordToEntries(aliases));
     }
   }, [rommConfig]);
 
@@ -488,6 +485,23 @@ export default function ImportSettings() {
                     />
                   </div>
 
+                  {/* Simple/Advanced mode toggle — always interactive */}
+                  <div className="flex items-center justify-between border-t pt-4 pb-6">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm font-medium">Advanced Mode</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Show routing, naming, and conflict options.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={!simpleMode}
+                      onCheckedChange={(checked) => {
+                        setSimpleMode(!checked);
+                        localStorage.setItem("questarr.rommSimpleMode", String(!checked));
+                      }}
+                    />
+                  </div>
+
                   {/* Everything below dims when disabled */}
                   <div
                     className={
@@ -495,6 +509,13 @@ export default function ImportSettings() {
                     }
                   >
                     <Separator className="mb-6" />
+
+                    {simpleMode && (
+                      <p className="text-xs text-muted-foreground mb-4">
+                        Files are moved from your download folder into the correct platform
+                        subfolder under your RomM library.
+                      </p>
+                    )}
 
                     {/* ── Library ── */}
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
@@ -518,76 +539,23 @@ export default function ImportSettings() {
                       </div>
                     </div>
 
-                    <Separator className="mb-6" />
+                    {!simpleMode && (
+                      <>
+                        <Separator className="mb-6" />
 
-                    {/* ── Routing ── */}
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                      Platform Routing
-                    </p>
-                    <div className="space-y-4 mb-6">
-                      <div className="space-y-1.5">
-                        <Label>Routing Mode</Label>
-                        <Select
-                          value={localRomm.platformRoutingMode}
-                          onValueChange={(value) =>
-                            setLocalRomm({
-                              ...localRomm,
-                              platformRoutingMode: value as RomMConfig["platformRoutingMode"],
-                            })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="slug-subfolder">
-                              Slug subfolder — library/&lt;slug&gt;/
-                            </SelectItem>
-                            <SelectItem value="binding-map">
-                              Binding map — explicit slug → path table
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {localRomm.platformRoutingMode === "binding-map" && (
-                        <>
+                        {/* ── Platform Routing ── */}
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                          Platform Routing
+                        </p>
+                        <div className="space-y-4 mb-6">
                           <div className="space-y-1.5">
-                            <Label>Platform Bindings</Label>
-                            <p className="text-xs text-muted-foreground">
-                              Map each RomM slug to a destination path.
-                            </p>
-                            <KVEditor
-                              entries={bindingEntries}
-                              onChange={setBindingEntries}
-                              keyPlaceholder="slug (e.g. ps2)"
-                              valuePlaceholder="path (e.g. /data/ps2)"
-                              disabled={!localRomm.enabled}
-                            />
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <div className="space-y-0.5">
-                              <Label>Allow Absolute Paths</Label>
-                              <p className="text-xs text-muted-foreground">
-                                Permit binding values that start with /.
-                              </p>
-                            </div>
-                            <Switch
-                              checked={localRomm.allowAbsoluteBindings}
-                              onCheckedChange={(c) =>
-                                setLocalRomm({ ...localRomm, allowAbsoluteBindings: c })
-                              }
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label>Missing Binding</Label>
+                            <Label>Routing Mode</Label>
                             <Select
-                              value={localRomm.bindingMissingBehavior}
+                              value={localRomm.platformRoutingMode}
                               onValueChange={(value) =>
                                 setLocalRomm({
                                   ...localRomm,
-                                  bindingMissingBehavior:
-                                    value as RomMConfig["bindingMissingBehavior"],
+                                  platformRoutingMode: value as RomMConfig["platformRoutingMode"],
                                 })
                               }
                             >
@@ -595,48 +563,79 @@ export default function ImportSettings() {
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="fallback">Fallback to slug subfolder</SelectItem>
-                                <SelectItem value="error">Error</SelectItem>
+                                <SelectItem value="slug-subfolder">
+                                  Slug subfolder — library/&lt;slug&gt;/
+                                </SelectItem>
+                                <SelectItem value="binding-map">
+                                  Binding map — explicit slug → path table
+                                </SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
-                        </>
-                      )}
 
-                      <div className="space-y-1.5">
-                        <Label>Platform Aliases</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Override the slug used for a platform. Questarr key → RomM slug.
-                        </p>
-                        <KVEditor
-                          entries={aliasEntries}
-                          onChange={setAliasEntries}
-                          keyPlaceholder="questarr key"
-                          valuePlaceholder="romm slug"
-                          disabled={!localRomm.enabled}
-                        />
-                      </div>
+                          {localRomm.platformRoutingMode === "binding-map" && (
+                            <>
+                              <div className="space-y-1.5">
+                                <Label>Platform Bindings</Label>
+                                <p className="text-xs text-muted-foreground">
+                                  Map each RomM slug to a destination path.
+                                </p>
+                                <KVEditor
+                                  entries={bindingEntries}
+                                  onChange={setBindingEntries}
+                                  keyPlaceholder="slug (e.g. ps2)"
+                                  valuePlaceholder="path (e.g. /data/ps2)"
+                                  disabled={!localRomm.enabled}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label>Missing Binding</Label>
+                                <Select
+                                  value={localRomm.bindingMissingBehavior}
+                                  onValueChange={(value) =>
+                                    setLocalRomm({
+                                      ...localRomm,
+                                      bindingMissingBehavior:
+                                        value as RomMConfig["bindingMissingBehavior"],
+                                    })
+                                  }
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="fallback">
+                                      Fallback to slug subfolder
+                                    </SelectItem>
+                                    <SelectItem value="error">Error</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </>
+                          )}
 
-                      <div className="space-y-1.5">
-                        <Label>Allowed Slugs</Label>
-                        <Input
-                          placeholder="ps2, snes, n64 — leave empty for all"
-                          value={(localRomm.allowedSlugs || []).join(", ")}
-                          onChange={(e) =>
-                            setLocalRomm({
-                              ...localRomm,
-                              allowedSlugs: e.target.value
-                                .split(",")
-                                .map((s) => s.trim())
-                                .filter(Boolean),
-                            })
-                          }
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Only import games matching these slugs. Empty = no filter.
-                        </p>
-                      </div>
-                    </div>
+                          <div className="space-y-1.5">
+                            <Label>Allowed Slugs</Label>
+                            <Input
+                              placeholder="ps2, snes, n64 — leave empty for all"
+                              value={(localRomm.allowedSlugs || []).join(", ")}
+                              onChange={(e) =>
+                                setLocalRomm({
+                                  ...localRomm,
+                                  allowedSlugs: e.target.value
+                                    .split(",")
+                                    .map((s) => s.trim())
+                                    .filter(Boolean),
+                                })
+                              }
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Only import games matching these slugs. Empty = no filter.
+                            </p>
+                          </div>
+                        </div>
+                      </>
+                    )}
 
                     <Separator className="mb-6" />
 
@@ -673,86 +672,99 @@ export default function ImportSettings() {
                             </p>
                           )}
                       </div>
-                      <div className="space-y-1.5">
-                        <Label>On Conflict</Label>
-                        <Select
-                          value={localRomm.conflictPolicy}
-                          onValueChange={(value) =>
-                            setLocalRomm({
-                              ...localRomm,
-                              conflictPolicy: value as RomMConfig["conflictPolicy"],
-                            })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="rename">Rename — keep both</SelectItem>
-                            <SelectItem value="skip">Skip — keep existing</SelectItem>
-                            <SelectItem value="overwrite">Overwrite — replace existing</SelectItem>
-                            <SelectItem value="fail">Fail — abort import</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    <Separator className="mb-6" />
-
-                    {/* ── Naming ── */}
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                      Naming
-                    </p>
-                    <div className="space-y-4 mb-6">
-                      <div className="space-y-1.5">
-                        <Label>Folder Naming Template</Label>
-                        <Input
-                          value={localRomm.folderNamingTemplate}
-                          onChange={(e) =>
-                            setLocalRomm({ ...localRomm, folderNamingTemplate: e.target.value })
-                          }
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Available tokens: {"{title}"}
-                        </p>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>Single-File Placement</Label>
-                        <Select
-                          value={localRomm.singleFilePlacement}
-                          onValueChange={(value) =>
-                            setLocalRomm({
-                              ...localRomm,
-                              singleFilePlacement: value as RomMConfig["singleFilePlacement"],
-                            })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="root">Root — directly in platform folder</SelectItem>
-                            <SelectItem value="subfolder">
-                              Subfolder — inside a named subfolder
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <Label>Include Region / Language Tags</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Append region/language info to file names when available.
-                          </p>
+                      {!simpleMode && (
+                        <div className="space-y-1.5">
+                          <Label>On Conflict</Label>
+                          <Select
+                            value={localRomm.conflictPolicy}
+                            onValueChange={(value) =>
+                              setLocalRomm({
+                                ...localRomm,
+                                conflictPolicy: value as RomMConfig["conflictPolicy"],
+                              })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="rename">Rename — keep both</SelectItem>
+                              <SelectItem value="skip">Skip — keep existing</SelectItem>
+                              <SelectItem value="overwrite">
+                                Overwrite — replace existing
+                              </SelectItem>
+                              <SelectItem value="fail">Fail — abort import</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
-                        <Switch
-                          checked={localRomm.includeRegionLanguageTags}
-                          onCheckedChange={(c) =>
-                            setLocalRomm({ ...localRomm, includeRegionLanguageTags: c })
-                          }
-                        />
-                      </div>
+                      )}
                     </div>
+
+                    {!simpleMode && (
+                      <>
+                        <Separator className="mb-6" />
+
+                        {/* ── Naming ── */}
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                          Naming
+                        </p>
+                        <div className="space-y-4 mb-6">
+                          <div className="space-y-1.5">
+                            <Label>Folder Naming Template</Label>
+                            <Input
+                              value={localRomm.folderNamingTemplate}
+                              onChange={(e) =>
+                                setLocalRomm({
+                                  ...localRomm,
+                                  folderNamingTemplate: e.target.value,
+                                })
+                              }
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Available tokens: {"{title}"}
+                            </p>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label>Single-File Placement</Label>
+                            <Select
+                              value={localRomm.singleFilePlacement}
+                              onValueChange={(value) =>
+                                setLocalRomm({
+                                  ...localRomm,
+                                  singleFilePlacement: value as RomMConfig["singleFilePlacement"],
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="root">
+                                  Root — directly in platform folder
+                                </SelectItem>
+                                <SelectItem value="subfolder">
+                                  Subfolder — inside a named subfolder
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <Label>Include Region / Language Tags</Label>
+                              <p className="text-xs text-muted-foreground">
+                                Append region/language info to file names when available.
+                              </p>
+                            </div>
+                            <Switch
+                              checked={localRomm.includeRegionLanguageTags}
+                              onCheckedChange={(c) =>
+                                setLocalRomm({ ...localRomm, includeRegionLanguageTags: c })
+                              }
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
 
                     <Separator className="mb-6" />
 
@@ -774,7 +786,6 @@ export default function ImportSettings() {
                     updateRommMutation.mutate({
                       ...localRomm,
                       platformBindings: entriesToRecord(bindingEntries),
-                      platformAliases: entriesToRecord(aliasEntries),
                     })
                   }
                   disabled={updateRommMutation.isPending}
@@ -785,8 +796,6 @@ export default function ImportSettings() {
                   Save Changes
                 </Button>
               </div>
-
-              <PlatformMappingSettings />
             </>
           )}
         </TabsContent>

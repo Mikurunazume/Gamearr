@@ -86,7 +86,9 @@ export function PathMappingSettings() {
           <div>
             <CardTitle>Path Mappings</CardTitle>
             <CardDescription>
-              Map remote download paths (from downloaders) to local server paths.
+              Used to indicate where the downloads from your downloaders are stored, from the point
+              of view of Questarr. e.g if your downloader saves files into <code>/downloads</code>{" "}
+              but Questarr sees that folder as <code>/mnt/nas/downloads</code>. identical paths.
             </CardDescription>
           </div>
           <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
