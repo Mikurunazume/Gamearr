@@ -415,14 +415,6 @@ export async function checkDownloadStatus() {
             );
 
             if (details && details.downloadDir) {
-              // Construct path.
-              // Transmission/Qbit usually return downloadDir as the parent folder, and name as the subfolder/file.
-              // Verify if 'name' is already included in 'downloadDir' or if they need joining.
-              // Usually: downloadDir + "/" + name
-              // Use path module for safety? server/cron.ts doesn't import path.
-              // Simple string concatenation is fine for now as we just pass it to PathMappingService which handles it.
-              // For multi-file torrents, 'name' is the folder name. For single file, 'name' is filename.
-              // 'downloadDir' is the *save path* (parent).
               const remotePath = `${details.downloadDir}/${details.name}`;
 
               // Delegate to ImportManager
@@ -430,16 +422,9 @@ export async function checkDownloadStatus() {
             } else {
               igdbLogger.warn(
                 { downloadId: download.id, hash: download.downloadHash },
-                "Could not fetch download details or path is missing. Skipping import."
+                "Could not fetch download details or path is missing. Flagging for manual review."
               );
-              // If we can't get details, we can't import properly.
-              // Should we mark as completed anyway to avoid loop?
-              // If we don't, it will loop forever.
-              // Let's fallback to marking completed if import fails to start due to missing info?
-              // Or let ImportManager handle it? ImportManager needs path.
-              // Safer to fallback to old behavior: mark completed.
-              await storage.updateGameDownloadStatus(download.id, "completed");
-              await storage.updateGameStatus(download.gameId, { status: "owned" });
+              await storage.updateGameDownloadStatus(download.id, "manual_review_required");
             }
 
             // Send notification

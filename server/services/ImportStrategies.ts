@@ -162,9 +162,10 @@ export class PCImportStrategy implements ImportStrategy {
   ): Promise<ImportResult> {
     await fs.ensureDir(path.dirname(review.proposedPath));
     const modeUsed = await transferFile(review.originalPath, review.proposedPath, transferMode);
+    const filesPlaced = await gatherFiles(review.proposedPath);
     return {
       destDir: review.proposedPath,
-      filesPlaced: [review.proposedPath],
+      filesPlaced,
       modeUsed,
       conflictsResolved: [],
     };

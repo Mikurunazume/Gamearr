@@ -554,8 +554,17 @@ importRouter.post("/:id/confirm", async (req, res) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    if (error instanceof Error && error.message === "Invalid proposed path") {
-      return res.status(400).json({ error: "Invalid proposed path" });
+    if (error instanceof Error) {
+      if (
+        error.message === "Invalid proposed path" ||
+        error.message === "Confirmation requires a plan" ||
+        error.message === "Could not resolve original path for import"
+      ) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error.message.includes("not found")) {
+        return res.status(404).json({ error: error.message });
+      }
     }
     console.error("Error confirming import:", error);
     res.status(500).json({ error: "Internal server error" });
