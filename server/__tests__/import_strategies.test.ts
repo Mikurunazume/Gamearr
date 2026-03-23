@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { randomBytes } from "node:crypto";
 import fs from "fs-extra";
-import os from "os";
-import path from "path";
+import os from "node:os";
+import path from "node:path";
 import { PCImportStrategy, RomMImportStrategy } from "../services/ImportStrategies.js";
 import type { Game, ImportConfig, RomMConfig } from "../../shared/schema.js";
 
@@ -10,7 +11,7 @@ const cleanup: string[] = [];
 function tempDir(): string {
   const dir = path.join(
     os.tmpdir(),
-    `questarr-import-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    `questarr-import-${Date.now()}-${randomBytes(8).toString("hex")}`
   );
   cleanup.push(dir);
   return dir;

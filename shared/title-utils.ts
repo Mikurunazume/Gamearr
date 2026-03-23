@@ -11,8 +11,8 @@
 export function normalizeTitle(title: string): string {
   return title
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ") // Replace non-alphanumeric with space
-    .replace(/\s+/g, " ") // Multiple spaces to single space
+    .replaceAll(/[^a-z0-9\s]/g, " ") // Replace non-alphanumeric with space
+    .replaceAll(/\s+/g, " ") // Multiple spaces to single space
     .trim();
 }
 
@@ -77,7 +77,7 @@ export function cleanReleaseName(releaseName: string): string {
   });
 
   // Final cleanup of extra symbols and spaces
-  return cleaned.replace(/[[\]]/g, " ").replace(/\s+/g, " ").trim();
+  return cleaned.replaceAll(/[[\]]/g, " ").replaceAll(/\s+/g, " ").trim();
 }
 
 /**

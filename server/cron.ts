@@ -339,6 +339,208 @@ export async function checkGameUpdates() {
   );
 }
 
+async function handleCompletedDownload(
+  download: Awaited<ReturnType<typeof storage.getDownloadingGameDownloads>>[number],
+  downloader: NonNullable<Awaited<ReturnType<typeof storage.getDownloader>>>,
+  remoteDownload: { status: string; progress: number }
+) {
+  igdbLogger.info(
+    {
+      item: download.downloadTitle,
+      status: remoteDownload.status,
+      progress: remoteDownload.progress,
+    },
+    "Download completed - triggering import processing"
+  );
+
+  // Fetch full details to get the path
+  // detailed info is needed for the path (downloadDir)
+  const details = await DownloaderManager.getDownloadDetails(downloader, download.downloadHash);
+
+  if (details && details.downloadDir) {
+    const remotePath = `${details.downloadDir}/${details.name}`;
+
+    // Delegate to ImportManager
+    await importManager.processImport(download.id, remotePath);
+  } else {
+    igdbLogger.warn(
+      { downloadId: download.id, hash: download.downloadHash },
+      "Could not fetch download details or path is missing. Flagging for manual review."
+    );
+    await storage.updateGameDownloadStatus(download.id, "manual_review_required");
+  }
+
+  // Send notification
+  const message = `Download finished for ${download.downloadTitle}`;
+  const notification = await storage.addNotification({
+    type: "success",
+    title: "Download Completed",
+    message,
+    link: "/library",
+  });
+  notifyUser("notification", notification);
+}
+
+function resolveDownloadStatuses(remoteStatus: string) {
+  let newDownloadStatus: "downloading" | "paused" | "failed" | "completed" = "downloading";
+  let newGameStatus: "wanted" | "downloading" | "owned" = "downloading";
+
+  if (remoteStatus === "error") {
+    newDownloadStatus = "failed";
+    newGameStatus = "wanted"; // Reset to wanted on error
+  } else if (remoteStatus === "paused") {
+    newDownloadStatus = "paused";
+    newGameStatus = "downloading"; // Still consider it downloading (user can resume)
+  } else if (remoteStatus === "downloading") {
+    newDownloadStatus = "downloading";
+    newGameStatus = "downloading";
+  }
+
+  return { newDownloadStatus, newGameStatus };
+}
+
+async function handleInProgressDownload(
+  download: Awaited<ReturnType<typeof storage.getDownloadingGameDownloads>>[number],
+  remoteDownload: { status: string; progress: number; error?: string }
+) {
+  // Sync download status with actual status from downloader
+  const { newDownloadStatus, newGameStatus } = resolveDownloadStatuses(remoteDownload.status);
+
+  if (remoteDownload.status === "error") {
+    igdbLogger.warn(
+      { title: download.downloadTitle, error: remoteDownload.error },
+      "Download error detected"
+    );
+  }
+
+  // Only update if status changed
+  if (download.status !== newDownloadStatus) {
+    await storage.updateGameDownloadStatus(download.id, newDownloadStatus);
+    igdbLogger.debug(
+      {
+        title: download.downloadTitle,
+        oldStatus: download.status,
+        newStatus: newDownloadStatus,
+      },
+      "Updated download status"
+    );
+  }
+
+  // Update game status
+  const game = await storage.getGame(download.gameId);
+  if (game && game.status !== newGameStatus) {
+    await storage.updateGameStatus(download.gameId, { status: newGameStatus });
+    igdbLogger.debug(
+      { gameId: download.gameId, oldStatus: game.status, newStatus: newGameStatus },
+      "Updated game status"
+    );
+  }
+}
+
+async function handleMissingDownload(
+  download: Awaited<ReturnType<typeof storage.getDownloadingGameDownloads>>[number]
+) {
+  // Download missing from downloader
+  // NOTE: This could happen for several reasons:
+  // 1. Download completed and was removed by the user
+  // 2. Download failed and was manually removed
+  // 3. Download was cancelled by the user
+  // 4. Downloader was cleared/reset
+  // Currently, we assume completion, but this may not always be correct.
+  // TODO: Consider adding a user preference to handle this scenario differently
+  // (e.g., reset to "wanted" status, or require manual confirmation)
+
+  // Fetch game info for better logging and notification
+  const game = await storage.getGame(download.gameId);
+  const gameTitle = game ? game.title : download.downloadTitle;
+
+  igdbLogger.warn(
+    {
+      gameId: download.gameId,
+      downloadId: download.id,
+      downloadTitle: download.downloadTitle,
+      gameTitle,
+      downloadHash: download.downloadHash,
+    },
+    "Download not found in downloader - assuming completion and marking as owned. " +
+      "This could indicate the download was manually removed."
+  );
+
+  // Mark download as completed (assumption)
+  await storage.updateGameDownloadStatus(download.id, "completed");
+
+  // Update game status to owned (assumption)
+  await storage.updateGameStatus(download.gameId, { status: "owned" });
+
+  // Send notification to user about this automatic status change
+  const notification = await storage.addNotification({
+    type: "info",
+    title: "Download Status Changed",
+    message: `Download for "${gameTitle}" was not found in the downloader and has been marked as completed. If this was removed due to an error, you may need to re-download it.`,
+    link: "/library",
+  });
+  notifyUser("notification", notification);
+
+  igdbLogger.info(
+    { gameId: download.gameId, gameTitle },
+    "Automatically updated game status to 'owned' after download not found in downloader"
+  );
+}
+
+async function processDownloaderDownloads(
+  downloaderId: string,
+  downloads: Awaited<ReturnType<typeof storage.getDownloadingGameDownloads>>
+) {
+  const downloader = await storage.getDownloader(downloaderId);
+  if (!downloader || !downloader.enabled) return;
+
+  const activeDownloads = await DownloaderManager.getAllDownloads(downloader);
+  const activeDownloadMap = new Map(activeDownloads.map((t) => [t.id.toLowerCase(), t]));
+
+  igdbLogger.debug(
+    {
+      downloaderId,
+      activeDownloadCount: activeDownloads.length,
+      trackingCount: downloads.length,
+    },
+    "Checking downloads for downloader"
+  );
+
+  for (const download of downloads) {
+    // Match by hash/ID (handle case sensitivity just in case)
+    const remoteDownload = activeDownloadMap.get(download.downloadHash.toLowerCase());
+
+    if (!remoteDownload) {
+      await handleMissingDownload(download);
+      continue;
+    }
+
+    igdbLogger.debug(
+      {
+        item: download.downloadTitle,
+        status: remoteDownload.status,
+        progress: remoteDownload.progress,
+        dbStatus: download.status,
+        dbHash: download.downloadHash,
+        found: true,
+      },
+      "Checking download status"
+    );
+
+    // Check for completion
+    const isComplete =
+      remoteDownload.status === "completed" ||
+      remoteDownload.status === "seeding" ||
+      remoteDownload.progress >= 100;
+
+    if (isComplete) {
+      await handleCompletedDownload(download, downloader, remoteDownload);
+    } else {
+      await handleInProgressDownload(download, remoteDownload);
+    }
+  }
+}
+
 export async function checkDownloadStatus() {
   const downloadingDownloads = await storage.getDownloadingGameDownloads();
 
@@ -358,176 +560,8 @@ export async function checkDownloadStatus() {
 
   const entries = Array.from(downloadsByDownloader.entries());
   for (const [downloaderId, downloads] of entries) {
-    const downloader = await storage.getDownloader(downloaderId);
-    if (!downloader || !downloader.enabled) continue;
-
     try {
-      const activeDownloads = await DownloaderManager.getAllDownloads(downloader);
-      const activeDownloadMap = new Map(activeDownloads.map((t) => [t.id.toLowerCase(), t]));
-
-      igdbLogger.debug(
-        {
-          downloaderId,
-          activeDownloadCount: activeDownloads.length,
-          trackingCount: downloads.length,
-        },
-        "Checking downloads for downloader"
-      );
-
-      for (const download of downloads) {
-        // Match by hash/ID (handle case sensitivity just in case)
-        const remoteDownload = activeDownloadMap.get(download.downloadHash.toLowerCase());
-
-        if (remoteDownload) {
-          igdbLogger.debug(
-            {
-              item: download.downloadTitle,
-              status: remoteDownload.status,
-              progress: remoteDownload.progress,
-              dbStatus: download.status,
-              dbHash: download.downloadHash,
-              found: true,
-            },
-            "Checking download status"
-          );
-
-          // Check for completion
-          const isComplete =
-            remoteDownload.status === "completed" ||
-            remoteDownload.status === "seeding" ||
-            remoteDownload.progress >= 100;
-
-          if (isComplete) {
-            igdbLogger.info(
-              {
-                item: download.downloadTitle,
-                status: remoteDownload.status,
-                progress: remoteDownload.progress,
-              },
-              "Download completed - triggering import processing"
-            );
-
-            // Fetch full details to get the path
-            // detailed info is needed for the path (downloadDir)
-            const details = await DownloaderManager.getDownloadDetails(
-              downloader,
-              download.downloadHash
-            );
-
-            if (details && details.downloadDir) {
-              const remotePath = `${details.downloadDir}/${details.name}`;
-
-              // Delegate to ImportManager
-              await importManager.processImport(download.id, remotePath);
-            } else {
-              igdbLogger.warn(
-                { downloadId: download.id, hash: download.downloadHash },
-                "Could not fetch download details or path is missing. Flagging for manual review."
-              );
-              await storage.updateGameDownloadStatus(download.id, "manual_review_required");
-            }
-
-            // Send notification
-            const message = `Download finished for ${download.downloadTitle}`;
-            const notification = await storage.addNotification({
-              type: "success",
-              title: "Download Completed",
-              message,
-              link: "/library",
-            });
-            notifyUser("notification", notification);
-          } else {
-            // Sync download status with actual status from downloader
-            let newDownloadStatus: "downloading" | "paused" | "failed" | "completed" =
-              "downloading";
-            let newGameStatus: "wanted" | "downloading" | "owned" = "downloading";
-
-            if (remoteDownload.status === "error") {
-              newDownloadStatus = "failed";
-              newGameStatus = "wanted"; // Reset to wanted on error
-              igdbLogger.warn(
-                { title: download.downloadTitle, error: remoteDownload.error },
-                "Download error detected"
-              );
-            } else if (remoteDownload.status === "paused") {
-              newDownloadStatus = "paused";
-              newGameStatus = "downloading"; // Still consider it downloading (user can resume)
-            } else if (remoteDownload.status === "downloading") {
-              newDownloadStatus = "downloading";
-              newGameStatus = "downloading";
-            }
-
-            // Only update if status changed
-            if (download.status !== newDownloadStatus) {
-              await storage.updateGameDownloadStatus(download.id, newDownloadStatus);
-              igdbLogger.debug(
-                {
-                  title: download.downloadTitle,
-                  oldStatus: download.status,
-                  newStatus: newDownloadStatus,
-                },
-                "Updated download status"
-              );
-            }
-
-            // Update game status
-            const game = await storage.getGame(download.gameId);
-            if (game && game.status !== newGameStatus) {
-              await storage.updateGameStatus(download.gameId, { status: newGameStatus });
-              igdbLogger.debug(
-                { gameId: download.gameId, oldStatus: game.status, newStatus: newGameStatus },
-                "Updated game status"
-              );
-            }
-          }
-        } else {
-          // Download missing from downloader
-          // NOTE: This could happen for several reasons:
-          // 1. Download completed and was removed by the user
-          // 2. Download failed and was manually removed
-          // 3. Download was cancelled by the user
-          // 4. Downloader was cleared/reset
-          // Currently, we assume completion, but this may not always be correct.
-          // TODO: Consider adding a user preference to handle this scenario differently
-          // (e.g., reset to "wanted" status, or require manual confirmation)
-
-          // Fetch game info for better logging and notification
-          const game = await storage.getGame(download.gameId);
-          const gameTitle = game ? game.title : download.downloadTitle;
-
-          igdbLogger.warn(
-            {
-              gameId: download.gameId,
-              downloadId: download.id,
-              downloadTitle: download.downloadTitle,
-              gameTitle,
-              downloadHash: download.downloadHash,
-            },
-            "Download not found in downloader - assuming completion and marking as owned. " +
-              "This could indicate the download was manually removed."
-          );
-
-          // Mark download as completed (assumption)
-          await storage.updateGameDownloadStatus(download.id, "completed");
-
-          // Update game status to owned (assumption)
-          await storage.updateGameStatus(download.gameId, { status: "owned" });
-
-          // Send notification to user about this automatic status change
-          const notification = await storage.addNotification({
-            type: "info",
-            title: "Download Status Changed",
-            message: `Download for "${gameTitle}" was not found in the downloader and has been marked as completed. If this was removed due to an error, you may need to re-download it.`,
-            link: "/library",
-          });
-          notifyUser("notification", notification);
-
-          igdbLogger.info(
-            { gameId: download.gameId, gameTitle },
-            "Automatically updated game status to 'owned' after download not found in downloader"
-          );
-        }
-      }
+      await processDownloaderDownloads(downloaderId, downloads);
     } catch (error) {
       igdbLogger.error({ error, downloaderId }, "Error checking downloader status");
     }

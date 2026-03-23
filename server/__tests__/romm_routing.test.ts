@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { randomBytes } from "node:crypto";
 import fs from "fs-extra";
-import os from "os";
-import path from "path";
+import os from "node:os";
+import path from "node:path";
 import { resolveRommPlatformDir, validateRommSlug } from "../services/RommRouting.js";
 import { RomMImportStrategy } from "../services/ImportStrategies.js";
 import type { Game, ImportConfig, RomMConfig } from "../../shared/schema.js";
@@ -11,7 +12,7 @@ const tempRoots: string[] = [];
 function makeTempRoot(): string {
   const dir = path.join(
     os.tmpdir(),
-    `questarr-romm-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    `questarr-romm-${Date.now()}-${randomBytes(8).toString("hex")}`
   );
   tempRoots.push(dir);
   return dir;

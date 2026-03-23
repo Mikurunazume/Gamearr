@@ -138,7 +138,7 @@ describe("importRouter additional coverage", () => {
 
     const response = await request(app).patch("/api/imports/romm").send({
       enabled: true,
-      url: "http://169.254.169.254/latest/meta-data/",
+      url: "http://169.254.169.254/latest/meta-data/", // NOSONAR - intentional SSRF test URL
       apiKey: "k",
     });
 

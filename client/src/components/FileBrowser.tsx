@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Folder, File, ChevronRight, CornerLeftUp, Loader2, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -70,6 +70,53 @@ export function FileBrowser({
     }
   };
 
+  let scrollContent: React.ReactNode;
+  if (loading) {
+    scrollContent = (
+      <div className="flex items-center justify-center h-40">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  } else if (error) {
+    scrollContent = (
+      <div className="flex items-center justify-center h-40 text-destructive">{error}</div>
+    );
+  } else {
+    scrollContent = (
+      <div className="p-1 space-y-1">
+        {data?.items.length === 0 && (
+          <div className="text-center text-sm text-muted-foreground py-4">Empty directory</div>
+        )}
+        {data?.items.map((item) => (
+          <div
+            key={item.path}
+            role={item.isDirectory ? "button" : undefined}
+            tabIndex={item.isDirectory ? 0 : undefined}
+            className={`
+                    flex items-center gap-2 p-2 rounded-sm cursor-pointer hover:bg-accent
+                    ${!item.isDirectory ? "opacity-50 cursor-default" : ""}
+                  `}
+            onClick={() => item.isDirectory && handleNavigate(item.path)}
+            onKeyDown={(e) => {
+              if (item.isDirectory && (e.key === "Enter" || e.key === " ")) {
+                e.preventDefault();
+                handleNavigate(item.path);
+              }
+            }}
+          >
+            {item.isDirectory ? (
+              <Folder className="h-4 w-4 text-blue-500" />
+            ) : (
+              <File className="h-4 w-4 text-gray-500" />
+            )}
+            <span className="text-sm flex-1 truncate">{item.name}</span>
+            {item.isDirectory && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl h-[500px] flex flex-col">
@@ -92,41 +139,7 @@ export function FileBrowser({
           </Button>
         </div>
 
-        <ScrollArea className="flex-1 border rounded-md">
-          {loading ? (
-            <div className="flex items-center justify-center h-40">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
-          ) : error ? (
-            <div className="flex items-center justify-center h-40 text-destructive">{error}</div>
-          ) : (
-            <div className="p-1 space-y-1">
-              {data?.items.length === 0 && (
-                <div className="text-center text-sm text-muted-foreground py-4">
-                  Empty directory
-                </div>
-              )}
-              {data?.items.map((item) => (
-                <div
-                  key={item.path}
-                  className={`
-                    flex items-center gap-2 p-2 rounded-sm cursor-pointer hover:bg-accent
-                    ${!item.isDirectory ? "opacity-50 cursor-default" : ""}
-                  `}
-                  onClick={() => item.isDirectory && handleNavigate(item.path)}
-                >
-                  {item.isDirectory ? (
-                    <Folder className="h-4 w-4 text-blue-500" />
-                  ) : (
-                    <File className="h-4 w-4 text-gray-500" />
-                  )}
-                  <span className="text-sm flex-1 truncate">{item.name}</span>
-                  {item.isDirectory && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
-                </div>
-              ))}
-            </div>
-          )}
-        </ScrollArea>
+        <ScrollArea className="flex-1 border rounded-md">{scrollContent}</ScrollArea>
 
         <div className="flex justify-end pt-4 gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>

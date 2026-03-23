@@ -359,71 +359,82 @@ importRouter.get("/romm", async (req, res) => {
   }
 });
 
+function buildRommPatchResponse(
+  updates: z.infer<typeof rommConfigPatchSchema>,
+  settings: NonNullable<Awaited<ReturnType<typeof storage.getUserSettings>>>
+) {
+  return {
+    enabled: updates.enabled ?? settings.rommEnabled,
+    libraryRoot: updates.libraryRoot ?? settings.rommLibraryRoot ?? "/data",
+    platformRoutingMode:
+      updates.platformRoutingMode ?? settings.rommPlatformRoutingMode ?? "slug-subfolder",
+    platformBindings: updates.platformBindings ?? settings.rommPlatformBindings ?? {},
+    moveMode: updates.moveMode ?? settings.rommMoveMode ?? "move",
+    conflictPolicy: updates.conflictPolicy ?? settings.rommConflictPolicy ?? "rename",
+    folderNamingTemplate:
+      updates.folderNamingTemplate ?? settings.rommFolderNamingTemplate ?? "{title}",
+    singleFilePlacement: updates.singleFilePlacement ?? settings.rommSingleFilePlacement ?? "root",
+    multiFilePlacement: ROMM_MULTI_FILE_PLACEMENT,
+    includeRegionLanguageTags:
+      updates.includeRegionLanguageTags ?? settings.rommIncludeRegionLanguageTags ?? false,
+    allowedSlugs: updates.allowedSlugs ?? settings.rommAllowedSlugs ?? undefined,
+    bindingMissingBehavior:
+      updates.bindingMissingBehavior ?? settings.rommBindingMissingBehavior ?? "fallback",
+  };
+}
+
+async function validateRommUrl(
+  updates: z.infer<typeof rommConfigPatchSchema>
+): Promise<string | null> {
+  if (updates.url === undefined) return null;
+  const trimmedUrl = updates.url.trim();
+  if (!trimmedUrl) return "URL cannot be empty";
+  if (!(await isSafeUrl(trimmedUrl))) return "Unsafe URL";
+  updates.url = trimmedUrl;
+  return null;
+}
+
 importRouter.patch("/romm", async (req, res) => {
   try {
     const updates = rommConfigPatchSchema.parse(req.body);
     const userId = res.locals.userId as string;
 
     // Validate URL if provided
-    if (updates.url !== undefined) {
-      const trimmedUrl = updates.url.trim();
-      if (!trimmedUrl) {
-        return res.status(400).json({ error: "URL cannot be empty" });
-      }
-      if (!(await isSafeUrl(trimmedUrl))) {
-        return res.status(400).json({ error: "Unsafe URL" });
-      }
-      updates.url = trimmedUrl;
+    const urlError = await validateRommUrl(updates);
+    if (urlError) {
+      return res.status(400).json({ error: urlError });
     }
 
     const settings = await storage.getUserSettings(userId);
-    if (settings) {
-      // If enabling RomM, an effective URL must exist
-      if (updates.enabled) {
-        const effectiveUrl = updates.url || settings.rommUrl?.trim();
-        if (!effectiveUrl) {
-          return res.status(400).json({ error: "URL is required to enable RomM" });
-        }
-      }
-
-      const updated = await storage.updateUserSettings(userId, {
-        rommEnabled: updates.enabled,
-        rommUrl: updates.url,
-        rommApiKey: updates.apiKey,
-        rommLibraryRoot: updates.libraryRoot,
-        rommPlatformRoutingMode: updates.platformRoutingMode,
-        rommPlatformBindings: updates.platformBindings,
-        rommMoveMode: updates.moveMode,
-        rommConflictPolicy: updates.conflictPolicy,
-        rommFolderNamingTemplate: updates.folderNamingTemplate,
-        rommSingleFilePlacement: updates.singleFilePlacement,
-        rommIncludeRegionLanguageTags: updates.includeRegionLanguageTags,
-        rommAllowedSlugs: updates.allowedSlugs,
-        rommBindingMissingBehavior: updates.bindingMissingBehavior,
-      });
-      if (!updated) return res.status(404).json({ error: "Settings not found" });
-      res.json({
-        enabled: updates.enabled ?? settings.rommEnabled,
-        libraryRoot: updates.libraryRoot ?? settings.rommLibraryRoot ?? "/data",
-        platformRoutingMode:
-          updates.platformRoutingMode ?? settings.rommPlatformRoutingMode ?? "slug-subfolder",
-        platformBindings: updates.platformBindings ?? settings.rommPlatformBindings ?? {},
-        moveMode: updates.moveMode ?? settings.rommMoveMode ?? "move",
-        conflictPolicy: updates.conflictPolicy ?? settings.rommConflictPolicy ?? "rename",
-        folderNamingTemplate:
-          updates.folderNamingTemplate ?? settings.rommFolderNamingTemplate ?? "{title}",
-        singleFilePlacement:
-          updates.singleFilePlacement ?? settings.rommSingleFilePlacement ?? "root",
-        multiFilePlacement: ROMM_MULTI_FILE_PLACEMENT,
-        includeRegionLanguageTags:
-          updates.includeRegionLanguageTags ?? settings.rommIncludeRegionLanguageTags ?? false,
-        allowedSlugs: updates.allowedSlugs ?? settings.rommAllowedSlugs ?? undefined,
-        bindingMissingBehavior:
-          updates.bindingMissingBehavior ?? settings.rommBindingMissingBehavior ?? "fallback",
-      });
-    } else {
-      res.status(404).json({ error: "Settings not found" });
+    if (!settings) {
+      return res.status(404).json({ error: "Settings not found" });
     }
+
+    // If enabling RomM, an effective URL must exist
+    if (updates.enabled) {
+      const effectiveUrl = updates.url || settings.rommUrl?.trim();
+      if (!effectiveUrl) {
+        return res.status(400).json({ error: "URL is required to enable RomM" });
+      }
+    }
+
+    const updated = await storage.updateUserSettings(userId, {
+      rommEnabled: updates.enabled,
+      rommUrl: updates.url,
+      rommApiKey: updates.apiKey,
+      rommLibraryRoot: updates.libraryRoot,
+      rommPlatformRoutingMode: updates.platformRoutingMode,
+      rommPlatformBindings: updates.platformBindings,
+      rommMoveMode: updates.moveMode,
+      rommConflictPolicy: updates.conflictPolicy,
+      rommFolderNamingTemplate: updates.folderNamingTemplate,
+      rommSingleFilePlacement: updates.singleFilePlacement,
+      rommIncludeRegionLanguageTags: updates.includeRegionLanguageTags,
+      rommAllowedSlugs: updates.allowedSlugs,
+      rommBindingMissingBehavior: updates.bindingMissingBehavior,
+    });
+    if (!updated) return res.status(404).json({ error: "Settings not found" });
+    res.json(buildRommPatchResponse(updates, settings));
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
     res.status(500).json({ error: "Failed to update RomM config" });

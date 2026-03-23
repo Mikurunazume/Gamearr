@@ -1,6 +1,6 @@
 import { Router } from "express";
 import fs from "fs-extra";
-import path from "path";
+import path from "node:path";
 import { storage } from "../storage.js";
 
 export const systemRouter = Router();
@@ -64,7 +64,7 @@ systemRouter.get("/browse", async (req, res) => {
       name: f.name,
       path: toVirtualPath(path.join(validPath, f.name)),
       isDirectory: f.isDirectory(),
-      size: f.isDirectory() ? 0 : 0, // Getting size for all files might be slow
+      size: 0, // Getting size for all files might be slow
     }));
 
     // Sort: Directories first, then files

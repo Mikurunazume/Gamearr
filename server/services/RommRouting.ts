@@ -1,4 +1,4 @@
-import path from "path";
+import path from "node:path";
 import type { RomMBindingMissingBehavior, RomMPlatformRoutingMode } from "../../shared/schema.js";
 
 export interface ResolveRommPlatformDirOptions {
@@ -62,7 +62,7 @@ export function resolveRommPlatformDir(options: ResolveRommPlatformDirOptions): 
 
 export function sanitizeFsName(name: string): string {
   return name
-    .replace(/[\\/:*?"<>|]/g, "")
-    .replace(/\s+/g, " ")
+    .replaceAll(/[\\/:*?"<>|]/g, "")
+    .replaceAll(/\s+/g, " ")
     .trim();
 }

@@ -197,6 +197,70 @@ export class ImportManager {
   }
 
   /**
+   * Extracts the remote host from a downloader's URL, if available.
+   */
+  private extractRemoteHost(downloaderUrl: string): string | undefined {
+    try {
+      const url = new URL(downloaderUrl);
+      return url.hostname;
+    } catch {
+      console.warn(`[ImportManager] Invalid downloader URL: ${downloaderUrl}`);
+      return undefined;
+    }
+  }
+
+  /**
+   * Translates a remote download path to a local path using the downloader's host.
+   */
+  private async resolveLocalPath(
+    remoteDownloadPath: string,
+    downloaderId: string
+  ): Promise<string> {
+    const downloader = await this.storage.getDownloader(downloaderId);
+    const remoteHost = downloader ? this.extractRemoteHost(downloader.url) : undefined;
+    return this.pathService.translatePath(remoteDownloadPath, remoteHost);
+  }
+
+  /**
+   * Checks if a PC import should be skipped due to platform filtering.
+   * Returns true if the import should be skipped.
+   */
+  private shouldSkipPCPlatform(
+    strategy: ImportStrategy,
+    downloadTitle: string,
+    game: NonNullable<Awaited<ReturnType<IStorage["getGame"]>>>,
+    importPlatformIds: number[]
+  ): boolean {
+    if (!(strategy instanceof PCImportStrategy)) return false;
+
+    const gamePrimaryPlatformId = this.getPrimaryPlatformId(game);
+    const releasePlatformKey = this.getReleasePlatformKey(downloadTitle);
+    const releasePlatformId = this.getReleasePlatformIgdbId(releasePlatformKey);
+    const effectivePlatformId = releasePlatformId ?? gamePrimaryPlatformId;
+
+    if (!this.isPlatformEnabled(effectivePlatformId, importPlatformIds)) {
+      console.log(
+        `[ImportManager] Skipping import for ${game.title} because platform ${effectivePlatformId ?? "unknown"} is not enabled in general import platform filter.`
+      );
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Marks the download and game as imported/owned after a successful import.
+   */
+  private async finalizeImport(
+    downloadId: string,
+    game: NonNullable<Awaited<ReturnType<IStorage["getGame"]>>>
+  ): Promise<void> {
+    await this.storage.updateGameDownloadStatus(downloadId, "imported");
+    if (game.status !== "completed") {
+      await this.storage.updateGameStatus(game.id, { status: "owned" });
+    }
+  }
+
+  /**
    * Main entry point for post-download import processing.
    * Called when a download reaches a state that requires file placement.
    */
@@ -228,20 +292,7 @@ export class ImportManager {
       await this.storage.updateGameDownloadStatus(downloadId, "unpacking");
 
       // 1. Path Translation
-      const downloader = await this.storage.getDownloader(download.downloaderId);
-      let remoteHost: string | undefined;
-
-      if (downloader) {
-        try {
-          // Extract hostname from URL
-          const url = new URL(downloader.url);
-          remoteHost = url.hostname;
-        } catch {
-          console.warn(`[ImportManager] Invalid downloader URL: ${downloader.url}`);
-        }
-      }
-
-      const localPath = await this.pathService.translatePath(remoteDownloadPath, remoteHost);
+      const localPath = await this.resolveLocalPath(remoteDownloadPath, download.downloaderId);
 
       // 2. Archive Extraction (if enabled and applicable)
       const processingPath = config.autoUnpack ? await this.extractIfArchive(localPath) : localPath;
@@ -270,23 +321,16 @@ export class ImportManager {
         rommConfig.libraryRoot
       );
 
-      const gamePrimaryPlatformId = this.getPrimaryPlatformId(game);
-      const releasePlatformKey = this.getReleasePlatformKey(download.downloadTitle || "");
-      const releasePlatformId = this.getReleasePlatformIgdbId(releasePlatformKey);
-      const effectivePlatformId = releasePlatformId ?? gamePrimaryPlatformId;
-
-      if (strategy instanceof PCImportStrategy) {
-        const platformAllowed = this.isPlatformEnabled(
-          effectivePlatformId,
+      if (
+        this.shouldSkipPCPlatform(
+          strategy,
+          download.downloadTitle || "",
+          game,
           config.importPlatformIds
-        );
-        if (!platformAllowed) {
-          console.log(
-            `[ImportManager] Skipping import for ${game.title} because platform ${effectivePlatformId ?? "unknown"} is not enabled in general import platform filter.`
-          );
-          await this.storage.updateGameDownloadStatus(downloadId, "completed");
-          return;
-        }
+        )
+      ) {
+        await this.storage.updateGameDownloadStatus(downloadId, "completed");
+        return;
       }
 
       await fs.ensureDir(libraryRoot);
@@ -312,10 +356,7 @@ export class ImportManager {
         await fs.remove(processingPath);
       }
 
-      await this.storage.updateGameDownloadStatus(downloadId, "imported");
-      if (game.status !== "completed") {
-        await this.storage.updateGameStatus(game.id, { status: "owned" });
-      }
+      await this.finalizeImport(downloadId, game);
     } catch (err) {
       console.error(`[ImportManager] Import failed for ${downloadId}`, err);
       try {
@@ -323,6 +364,74 @@ export class ImportManager {
       } catch (statusErr) {
         console.error(`[ImportManager] Failed to set error status for ${downloadId}`, statusErr);
       }
+    }
+  }
+
+  /**
+   * Resolves the original path for an import confirmation, either from the override plan
+   * or by querying the downloader for the download details.
+   */
+  private async resolveConfirmOriginalPath(
+    overridePath: string | undefined,
+    download: NonNullable<Awaited<ReturnType<IStorage["getGameDownload"]>>>
+  ): Promise<string | undefined> {
+    if (overridePath) return overridePath;
+
+    // Attempt to find the original path via the downloader if not provided by the frontend
+    const downloader = await this.storage.getDownloader(download.downloaderId);
+    if (!downloader) return undefined;
+
+    const details = await DownloaderManager.getDownloadDetails(downloader, download.downloadHash);
+    if (!details || !details.downloadDir) return undefined;
+
+    const remotePath = `${details.downloadDir}/${details.name}`;
+    const remoteHost = this.extractRemoteHost(downloader.url);
+    return this.pathService.translatePath(remotePath, remoteHost);
+  }
+
+  /**
+   * Builds the appropriate import strategy for a confirm import based on the override plan's strategy type.
+   */
+  private async buildConfirmStrategy(
+    strategyType: "pc" | "romm",
+    downloadTitle: string,
+    game: NonNullable<Awaited<ReturnType<IStorage["getGame"]>>>
+  ): Promise<ImportStrategy> {
+    if (strategyType !== "romm") {
+      return new PCImportStrategy();
+    }
+
+    const releasePlatformKey = this.getReleasePlatformKey(downloadTitle);
+    const releasePlatformId = this.getReleasePlatformIgdbId(releasePlatformKey);
+    const gamePrimaryPlatformId = this.getPrimaryPlatformId(game);
+    const effectivePlatformId = releasePlatformId ?? gamePrimaryPlatformId;
+    const rommPlatform = effectivePlatformId
+      ? await this.platformService.getRomMPlatform(effectivePlatformId)
+      : null;
+    const fallbackSlugFromRelease = this.getReleasePlatformFallbackSlug(releasePlatformKey);
+    const baseSlug = rommPlatform || fallbackSlugFromRelease || "unknown";
+    const resolvedSlug = this.resolveRommSlug(baseSlug) || baseSlug;
+    return new RomMImportStrategy(resolvedSlug);
+  }
+
+  /**
+   * Validates that a proposed import path is within the configured library root.
+   */
+  private validateProposedPath(
+    proposedPath: string | undefined,
+    strategyType: "pc" | "romm",
+    configRoot: string,
+    rommRoot: string
+  ): void {
+    if (!proposedPath) return;
+
+    const root = strategyType === "romm" ? rommRoot : configRoot;
+    const resolvedRoot = path.resolve(root);
+    const resolvedTarget = path.resolve(proposedPath);
+    const insideRoot =
+      resolvedTarget === resolvedRoot || resolvedTarget.startsWith(resolvedRoot + path.sep);
+    if (!insideRoot) {
+      throw new Error("Proposed path is outside configured library root");
     }
   }
 
@@ -348,29 +457,10 @@ export class ImportManager {
       throw new Error("Confirmation requires a plan");
     }
 
-    let resolvedOriginalPath = overridePlan.originalPath;
-
-    if (!resolvedOriginalPath) {
-      // Attempt to find the original path via the downloader if not provided by the frontend
-      const downloader = await this.storage.getDownloader(download.downloaderId);
-      if (downloader) {
-        const details = await DownloaderManager.getDownloadDetails(
-          downloader,
-          download.downloadHash
-        );
-        if (details && details.downloadDir) {
-          const remotePath = `${details.downloadDir}/${details.name}`;
-          let remoteHost: string | undefined;
-          try {
-            const url = new URL(downloader.url);
-            remoteHost = url.hostname;
-          } catch {
-            console.warn(`[ImportManager] Invalid downloader URL: ${downloader.url}`);
-          }
-          resolvedOriginalPath = await this.pathService.translatePath(remotePath, remoteHost);
-        }
-      }
-    }
+    const resolvedOriginalPath = await this.resolveConfirmOriginalPath(
+      overridePlan.originalPath,
+      download
+    );
 
     if (!resolvedOriginalPath) {
       throw new Error("Could not resolve original path for import");
@@ -384,34 +474,18 @@ export class ImportManager {
     const config = await this.storage.getImportConfig(game.userId ?? undefined);
     const rommConfig = await this.storage.getRomMConfig(game.userId ?? undefined);
 
-    // Execute via the proper strategy
-    let strategy: ImportStrategy;
-    if (overridePlan.strategy === "romm") {
-      const releasePlatformKey = this.getReleasePlatformKey(download.downloadTitle || "");
-      const releasePlatformId = this.getReleasePlatformIgdbId(releasePlatformKey);
-      const gamePrimaryPlatformId = this.getPrimaryPlatformId(game);
-      const effectivePlatformId = releasePlatformId ?? gamePrimaryPlatformId;
-      const rommPlatform = effectivePlatformId
-        ? await this.platformService.getRomMPlatform(effectivePlatformId)
-        : null;
-      const fallbackSlugFromRelease = this.getReleasePlatformFallbackSlug(releasePlatformKey);
-      const baseSlug = rommPlatform || fallbackSlugFromRelease || "unknown";
-      const resolvedSlug = this.resolveRommSlug(baseSlug) || baseSlug;
-      strategy = new RomMImportStrategy(resolvedSlug);
-    } else {
-      strategy = new PCImportStrategy();
-    }
+    const strategy = await this.buildConfirmStrategy(
+      overridePlan.strategy,
+      download.downloadTitle || "",
+      game
+    );
 
-    if (overridePlan.proposedPath) {
-      const root = overridePlan.strategy === "romm" ? rommConfig.libraryRoot : config.libraryRoot;
-      const resolvedRoot = path.resolve(root);
-      const resolvedTarget = path.resolve(overridePlan.proposedPath);
-      const insideRoot =
-        resolvedTarget === resolvedRoot || resolvedTarget.startsWith(resolvedRoot + path.sep);
-      if (!insideRoot) {
-        throw new Error("Proposed path is outside configured library root");
-      }
-    }
+    this.validateProposedPath(
+      overridePlan.proposedPath,
+      overridePlan.strategy,
+      config.libraryRoot,
+      rommConfig.libraryRoot
+    );
 
     const processPath = overridePlan.unpack
       ? await this.extractIfArchive(resolvedOriginalPath)
@@ -429,11 +503,7 @@ export class ImportManager {
     try {
       await strategy.executeImport(planToExecute, transferMode, rommConfig);
 
-      await this.storage.updateGameDownloadStatus(downloadId, "imported");
-
-      if (game.status !== "completed") {
-        await this.storage.updateGameStatus(game.id, { status: "owned" });
-      }
+      await this.finalizeImport(downloadId, game);
     } catch (err) {
       console.error(`[ImportManager] confirmImport failed for ${downloadId}`, err);
       try {

@@ -1,4 +1,4 @@
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { extractFullMock, ensureDirMock } = vi.hoisted(() => ({
@@ -36,7 +36,7 @@ describe("ArchiveService", () => {
     extractFullMock.mockReturnValue(stream);
 
     const service = new ArchiveService();
-    const resultPromise = service.extract("/downloads/game.zip", "/tmp/out");
+    const resultPromise = service.extract("/downloads/game.zip", "/tmp/out"); // NOSONAR - mocked fs, no real dir access
 
     // Let the async setup complete so stream listeners are attached.
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -54,7 +54,7 @@ describe("ArchiveService", () => {
     expect(ensureDirMock).toHaveBeenCalledWith("/tmp/out");
     expect(extractFullMock).toHaveBeenCalledWith(
       "/downloads/game.zip",
-      "/tmp/out",
+      "/tmp/out", // NOSONAR - mocked fs, no real dir access
       expect.objectContaining({
         $bin: "/mock/7za",
         recursive: true,
@@ -67,7 +67,7 @@ describe("ArchiveService", () => {
     extractFullMock.mockReturnValue(stream);
 
     const service = new ArchiveService();
-    const resultPromise = service.extract("/downloads/bad.zip", "/tmp/out");
+    const resultPromise = service.extract("/downloads/bad.zip", "/tmp/out"); // NOSONAR - mocked fs, no real dir access
 
     // Let the async setup complete so stream listeners are attached.
     await new Promise((resolve) => setTimeout(resolve, 0));
