@@ -6,7 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **At the start of every session**, read the files in `/memory/` to restore context:
 
-
 - `memory/user.md` — who the user is, their background and working style
 - `memory/preferences.md` — coding and workflow preferences for this project
 - `memory/decisions.md` — past architectural and technical decisions

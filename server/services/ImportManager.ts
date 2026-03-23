@@ -11,7 +11,7 @@ import {
 } from "./ImportStrategies.js";
 import { DownloaderManager } from "../downloaders.js";
 import fs from "fs-extra";
-import path from "path";
+import path from "node:path";
 import { parseReleaseMetadata } from "../../shared/title-utils.js";
 
 const RELEASE_PLATFORM_TO_IGDB_ID: Record<string, number> = {
@@ -66,22 +66,28 @@ const RELEASE_PLATFORM_TO_FALLBACK_SLUG: Record<string, string> = {
 
 export class ImportManager {
   constructor(
-    private storage: IStorage,
-    private pathService: PathMappingService,
-    private platformService: PlatformMappingService,
-    private archiveService: ArchiveService
+    private readonly storage: IStorage,
+    private readonly pathService: PathMappingService,
+    private readonly platformService: PlatformMappingService,
+    private readonly archiveService: ArchiveService
   ) {}
+
+  private extractPlatformIdFromElement(p: unknown): number | undefined {
+    if (typeof p === "number") return p;
+    if (typeof p === "string" && /^\d+$/.test(p)) return Number(p);
+    if (p && typeof p === "object" && "id" in p) {
+      const id = (p as { id?: unknown }).id;
+      if (typeof id === "number") return id;
+      if (typeof id === "string" && /^\d+$/.test(id)) return Number(id);
+    }
+    return undefined;
+  }
 
   private getPrimaryPlatformId(game: { platforms?: unknown }): number | undefined {
     if (!Array.isArray(game.platforms)) return undefined;
     for (const p of game.platforms) {
-      if (typeof p === "number") return p;
-      if (typeof p === "string" && /^\d+$/.test(p)) return Number(p);
-      if (p && typeof p === "object" && "id" in p) {
-        const id = (p as { id?: unknown }).id;
-        if (typeof id === "number") return id;
-        if (typeof id === "string" && /^\d+$/.test(id)) return Number(id);
-      }
+      const platformId = this.extractPlatformIdFromElement(p);
+      if (platformId !== undefined) return platformId;
     }
     return undefined;
   }
