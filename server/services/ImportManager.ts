@@ -215,10 +215,15 @@ export class ImportManager {
   private async resolveLocalPath(
     remoteDownloadPath: string,
     downloaderId: string
-  ): Promise<string> {
+  ): Promise<{ localPath: string; downloaderName: string }> {
     const downloader = await this.storage.getDownloader(downloaderId);
     const remoteHost = downloader ? this.extractRemoteHost(downloader.url) : undefined;
-    return this.pathService.translatePath(remoteDownloadPath, remoteHost);
+    const downloaderName = downloader?.name ?? downloaderId;
+    console.log(
+      `[ImportManager] Resolving path "${remoteDownloadPath}" from downloader "${downloaderName}" (host: ${remoteHost ?? "none"})`
+    );
+    const localPath = await this.pathService.translatePath(remoteDownloadPath, remoteHost);
+    return { localPath, downloaderName };
   }
 
   /**
@@ -292,12 +297,26 @@ export class ImportManager {
       await this.storage.updateGameDownloadStatus(downloadId, "unpacking");
 
       // 1. Path Translation
-      const localPath = await this.resolveLocalPath(remoteDownloadPath, download.downloaderId);
+      const { localPath, downloaderName } = await this.resolveLocalPath(
+        remoteDownloadPath,
+        download.downloaderId
+      );
 
-      // 2. Archive Extraction (if enabled and applicable)
+      // 2. Verify path is accessible on this machine
+      console.log(`[ImportManager] Checking path accessibility: "${localPath}"`);
+      if (!(await fs.pathExists(localPath))) {
+        console.warn(
+          `[ImportManager] Path not accessible: "${localPath}" (reported by downloader "${downloaderName}" as "${remoteDownloadPath}"). ` +
+            `If Questarr and ${downloaderName} use different volume mounts, configure path mappings under Settings → Path Mappings.`
+        );
+        await this.storage.updateGameDownloadStatus(downloadId, "manual_review_required");
+        return;
+      }
+
+      // 3. Archive Extraction (if enabled and applicable)
       const processingPath = config.autoUnpack ? await this.extractIfArchive(localPath) : localPath;
 
-      // 3. Strategy Selection
+      // 4. Strategy Selection
       const rommConfig = await this.storage.getRomMConfig(game.userId ?? undefined);
       const providerSelection = await this.selectProviderForImport({
         game,

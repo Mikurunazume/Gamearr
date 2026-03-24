@@ -5,7 +5,7 @@ const { fsMock } = vi.hoisted(() => ({
     ensureDir: vi.fn().mockResolvedValue(undefined),
     move: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),
-    pathExists: vi.fn().mockResolvedValue(false),
+    pathExists: vi.fn().mockResolvedValue(true),
     stat: vi.fn().mockResolvedValue({ isDirectory: () => false }),
     readdir: vi.fn().mockResolvedValue([]),
   },
@@ -56,6 +56,7 @@ describe("ImportManager", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    fsMock.pathExists.mockResolvedValue(true);
     pathService.translatePath.mockResolvedValue("/data/downloads/file.iso");
     archiveService.isArchive.mockReturnValue(false);
     platformService.getRomMPlatform.mockResolvedValue(null);
@@ -134,6 +135,34 @@ describe("ImportManager", () => {
     await manager.processImport("dl-1", "/remote/path");
 
     expect(storage.updateGameDownloadStatus).toHaveBeenCalledWith("dl-1", "completed");
+  });
+
+  it("flags manual review when download path is not accessible", async () => {
+    storage.getGameDownload.mockResolvedValue({
+      id: "dl-1",
+      gameId: "g1",
+      downloaderId: "d1",
+    });
+    storage.getGame.mockResolvedValue({
+      id: "g1",
+      title: "Game",
+      userId: "u1",
+      status: "wanted",
+      platforms: [6],
+    });
+    storage.getDownloader.mockResolvedValue({ id: "d1", name: "qBit", url: "http://qbit:8080" });
+    fsMock.pathExists.mockResolvedValue(false);
+
+    const manager = new ImportManager(
+      storage as never,
+      pathService as never,
+      platformService as never,
+      archiveService as never
+    );
+
+    await manager.processImport("dl-1", "/remote/path");
+
+    expect(storage.updateGameDownloadStatus).toHaveBeenCalledWith("dl-1", "manual_review_required");
   });
 
   it("marks download as error when processing throws", async () => {

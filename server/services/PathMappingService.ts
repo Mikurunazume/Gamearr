@@ -48,13 +48,25 @@ export class PathMappingService {
       // Replace the matched remote prefix with the local path, using OS-native path separators.
       const relative = remotePath.substring(bestMatch.remotePath.length);
       const cleanRelative = relative.replace(/^[/\\]/, "");
+      const localPath = path.join(bestMatch.localPath, cleanRelative);
 
-      return path.join(bestMatch.localPath, cleanRelative);
+      console.log(
+        `[PathMappingService] Mapped "${remotePath}" (host: ${remoteHost ?? "none"}) → "${localPath}" ` +
+          `via rule "${bestMatch.remotePath}" → "${bestMatch.localPath}"`
+      );
+      return localPath;
     }
 
-    console.warn(
-      `[PathMappingService] No path mapping matched for "${remotePath}" (host: ${remoteHost ?? "none"}). Using original path.`
-    );
+    if (mappings.length > 0) {
+      console.warn(
+        `[PathMappingService] No mapping matched "${remotePath}" (host: ${remoteHost ?? "none"}) — ` +
+          `${mappings.length} mapping(s) defined but none matched. Passing path through unchanged.`
+      );
+    } else {
+      console.log(
+        `[PathMappingService] No path mappings configured. Passing "${remotePath}" through unchanged.`
+      );
+    }
     return remotePath;
   }
 }
