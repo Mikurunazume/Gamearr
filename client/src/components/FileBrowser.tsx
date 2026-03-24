@@ -2,7 +2,13 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Folder, File, ChevronRight, CornerLeftUp, Loader2, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { apiRequest } from "@/lib/queryClient";
 
 interface FileStats {
@@ -40,9 +46,10 @@ export function FileBrowser({
   const [data, setData] = useState<BrowseResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fallbackAttempted, setFallbackAttempted] = useState(false);
 
   const loadPath = useCallback(
-    async (p: string) => {
+    async (p: string, attemptFallback: boolean = true) => {
       setLoading(true);
       setError(null);
       try {
@@ -51,7 +58,16 @@ export function FileBrowser({
           "GET",
           `/api/system/browse?path=${encodeURIComponent(p)}${rootParam}`
         );
-        if (!res.ok) throw new Error("Failed to load directory");
+        if (!res.ok) {
+          // If custom root fails and we haven't tried fallback yet, retry without root
+          if (attemptFallback && root !== undefined) {
+            console.warn(`Failed to browse path with root="${root}", falling back to library root`);
+            setFallbackAttempted(true);
+            return loadPath(p, false);
+          }
+          throw new Error("Failed to load directory");
+        }
+        setFallbackAttempted(false);
         const json = await res.json();
         setData(json);
       } catch (err) {
@@ -66,6 +82,7 @@ export function FileBrowser({
 
   useEffect(() => {
     if (open) {
+      setFallbackAttempted(false);
       loadPath(currentPath);
     }
   }, [open, currentPath, loadPath]);
@@ -132,6 +149,7 @@ export function FileBrowser({
       <DialogContent className="max-w-2xl h-[500px] flex flex-col">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>Navigate and select a directory</DialogDescription>
         </DialogHeader>
 
         <div className="flex items-center gap-2 p-2 bg-muted rounded-md mb-2">
