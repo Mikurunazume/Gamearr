@@ -9,7 +9,7 @@ export function makeGame(overrides: Partial<Game> = {}): Game {
     status: "wanted",
     userId: "u1",
     igdbId: null,
-    steamAppid: null,
+    steamAppId: null,
     summary: null,
     coverUrl: null,
     releaseDate: null,
@@ -65,7 +65,7 @@ export function createImportTestApp(router: Router, withUser = true) {
   app.use(express.json());
   app.use((req, _res, next) => {
     if (withUser) {
-      (req as express.Request & { user?: { id: string } }).user = { id: "user-1" };
+      (req as { user?: unknown }).user = { id: "user-1" };
     }
     next();
   });
