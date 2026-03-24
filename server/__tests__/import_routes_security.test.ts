@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import express from "express";
 import request from "supertest";
 
 const { mockStorage, mockImportManager } = vi.hoisted(() => ({
@@ -24,47 +23,22 @@ vi.mock("../services/index.js", () => ({
 }));
 
 import { importRouter } from "../routes/import.js";
+import {
+  makeImportConfig,
+  makeRommConfig,
+  createImportTestApp,
+} from "./helpers/import-test-helpers.js";
 
 describe("importRouter confirmImport security", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockStorage.getImportConfig.mockResolvedValue({
-      libraryRoot: "/data",
-      enablePostProcessing: true,
-      autoUnpack: false,
-      renamePattern: "{Title} ({Region})",
-      overwriteExisting: false,
-      transferMode: "move",
-      importPlatformIds: [],
-      ignoredExtensions: [],
-      minFileSize: 0,
-    });
-    mockStorage.getRomMConfig.mockResolvedValue({
-      enabled: true,
-      libraryRoot: "/data/romm",
-      platformRoutingMode: "slug-subfolder",
-      platformBindings: {},
-      moveMode: "hardlink",
-      conflictPolicy: "rename",
-      folderNamingTemplate: "{title}",
-      singleFilePlacement: "root",
-      multiFilePlacement: "subfolder",
-      includeRegionLanguageTags: false,
-
-      bindingMissingBehavior: "fallback",
-    });
+    mockStorage.getImportConfig.mockResolvedValue(
+      makeImportConfig({ renamePattern: "{Title} ({Region})" })
+    );
+    mockStorage.getRomMConfig.mockResolvedValue(makeRommConfig({ moveMode: "hardlink" }));
   });
 
-  function createApp() {
-    const app = express();
-    app.use(express.json());
-    app.use((req, _res, next) => {
-      (req as express.Request & { user?: { id: string } }).user = { id: "user-1" };
-      next();
-    });
-    app.use("/api/imports", importRouter);
-    return app;
-  }
+  const createApp = () => createImportTestApp(importRouter);
 
   it("rejects path traversal in proposedPath", async () => {
     const app = createApp();

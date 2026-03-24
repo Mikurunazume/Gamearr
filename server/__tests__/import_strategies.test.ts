@@ -4,7 +4,7 @@ import fs from "fs-extra";
 import os from "node:os";
 import path from "node:path";
 import { PCImportStrategy, RomMImportStrategy } from "../services/ImportStrategies.js";
-import type { Game, ImportConfig, RomMConfig } from "../../shared/schema.js";
+import { makeGame, makeImportConfig, makeRommConfig } from "./helpers/import-test-helpers.js";
 
 const cleanup: string[] = [];
 
@@ -23,58 +23,8 @@ afterEach(async () => {
   }
 });
 
-function makeGame(platforms: unknown): Game {
-  return {
-    id: "g1",
-    title: "Test Game",
-    status: "wanted",
-    userId: null,
-    igdbId: null,
-    steamAppid: null,
-    summary: null,
-    coverUrl: null,
-    releaseDate: null,
-    rating: null,
-    platforms: platforms as Game["platforms"],
-    genres: null,
-    publishers: null,
-    developers: null,
-    screenshots: null,
-    hidden: false,
-    originalReleaseDate: null,
-    releaseStatus: null,
-    addedAt: null,
-    completedAt: null,
-  };
-}
-
-const importConfig: ImportConfig = {
-  enablePostProcessing: true,
-  autoUnpack: false,
-  renamePattern: "{Title}",
-  overwriteExisting: false,
-  transferMode: "move",
-  importPlatformIds: [],
-  ignoredExtensions: [],
-  minFileSize: 0,
-  libraryRoot: "/data",
-};
-
-const rommConfig: RomMConfig = {
-  enabled: true,
-  url: "http://localhost:8080",
-  libraryRoot: "/data/romm",
-  platformRoutingMode: "slug-subfolder",
-  platformBindings: {},
-  moveMode: "copy",
-  conflictPolicy: "rename",
-  folderNamingTemplate: "{title}",
-  singleFilePlacement: "root",
-  multiFilePlacement: "subfolder",
-  includeRegionLanguageTags: false,
-
-  bindingMissingBehavior: "fallback",
-};
+const importConfig = makeImportConfig();
+const rommConfig = makeRommConfig({ url: "http://localhost:8080" });
 
 describe("ImportStrategies", () => {
   it("RomMImportStrategy can place a single file under routed platform directory", async () => {
@@ -88,7 +38,7 @@ describe("ImportStrategies", () => {
 
     const plan = await strategy.planImport(
       source,
-      makeGame([19]),
+      makeGame({ platforms: [19] }),
       localRomm.libraryRoot,
       importConfig,
       localRomm

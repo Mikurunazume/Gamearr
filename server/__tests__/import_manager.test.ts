@@ -17,6 +17,7 @@ vi.mock("fs-extra", () => ({
 
 import { ImportManager } from "../services/ImportManager.js";
 import { RomMImportStrategy } from "../services/ImportStrategies.js";
+import { makeImportConfig, makeRommConfig } from "./helpers/import-test-helpers.js";
 
 describe("ImportManager", () => {
   const storage = {
@@ -42,17 +43,7 @@ describe("ImportManager", () => {
     extract: vi.fn(),
   };
 
-  const baseConfig = {
-    enablePostProcessing: true,
-    autoUnpack: false,
-    renamePattern: "{Title}",
-    overwriteExisting: true,
-    transferMode: "move" as const,
-    importPlatformIds: [],
-    ignoredExtensions: [],
-    minFileSize: 0,
-    libraryRoot: "/data",
-  };
+  const baseConfig = makeImportConfig({ overwriteExisting: true });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -61,20 +52,9 @@ describe("ImportManager", () => {
     archiveService.isArchive.mockReturnValue(false);
     platformService.getRomMPlatform.mockResolvedValue(null);
     storage.getImportConfig.mockResolvedValue(baseConfig);
-    storage.getRomMConfig.mockResolvedValue({
-      enabled: false,
-      libraryRoot: "/data/romm",
-      platformRoutingMode: "slug-subfolder",
-      platformBindings: {},
-      moveMode: "hardlink",
-      conflictPolicy: "rename",
-      folderNamingTemplate: "{title}",
-      singleFilePlacement: "root",
-      multiFilePlacement: "subfolder",
-      includeRegionLanguageTags: false,
-
-      bindingMissingBehavior: "fallback",
-    });
+    storage.getRomMConfig.mockResolvedValue(
+      makeRommConfig({ enabled: false, moveMode: "hardlink" })
+    );
   });
 
   it("returns early when download cannot be found", async () => {
@@ -322,21 +302,9 @@ describe("ImportManager", () => {
       status: "wanted",
       platforms: [9999],
     });
-    storage.getRomMConfig.mockResolvedValue({
-      enabled: true,
-      url: "http://localhost:8080",
-      libraryRoot: "/data/romm",
-      platformRoutingMode: "slug-subfolder",
-      platformBindings: {},
-      moveMode: "hardlink",
-      conflictPolicy: "rename",
-      folderNamingTemplate: "{title}",
-      singleFilePlacement: "root",
-      multiFilePlacement: "subfolder",
-      includeRegionLanguageTags: false,
-
-      bindingMissingBehavior: "fallback",
-    });
+    storage.getRomMConfig.mockResolvedValue(
+      makeRommConfig({ url: "http://localhost:8080", moveMode: "hardlink" })
+    );
     platformService.getRomMPlatform.mockResolvedValue(null);
 
     const manager = new ImportManager(
@@ -365,22 +333,9 @@ describe("ImportManager", () => {
       status: "wanted",
       platforms: [19],
     });
-    storage.getRomMConfig.mockResolvedValue({
-      enabled: true,
-      url: "http://localhost:8080",
-      libraryRoot: "/data/romm",
-      platformRoutingMode: "slug-subfolder",
-      platformBindings: {},
-      moveMode: "hardlink",
-      conflictPolicy: "rename",
-      folderNamingTemplate: "{title}",
-      singleFilePlacement: "root",
-      multiFilePlacement: "subfolder",
-      includeRegionLanguageTags: false,
-
-      bindingMissingBehavior: "fallback",
-      allowedSlugs: ["gba"],
-    });
+    storage.getRomMConfig.mockResolvedValue(
+      makeRommConfig({ url: "http://localhost:8080", moveMode: "hardlink", allowedSlugs: ["gba"] })
+    );
     platformService.getRomMPlatform.mockResolvedValue("snes");
 
     const manager = new ImportManager(
@@ -443,21 +398,9 @@ describe("ImportManager", () => {
       status: "wanted",
       platforms: [19],
     });
-    storage.getRomMConfig.mockResolvedValue({
-      enabled: true,
-      url: "http://localhost:8080",
-      libraryRoot: "/data/romm",
-      platformRoutingMode: "slug-subfolder",
-      platformBindings: {},
-      moveMode: "hardlink",
-      conflictPolicy: "rename",
-      folderNamingTemplate: "{title}",
-      singleFilePlacement: "root",
-      multiFilePlacement: "subfolder",
-      includeRegionLanguageTags: false,
-
-      bindingMissingBehavior: "fallback",
-    });
+    storage.getRomMConfig.mockResolvedValue(
+      makeRommConfig({ url: "http://localhost:8080", moveMode: "hardlink" })
+    );
     platformService.getRomMPlatform.mockResolvedValue("snes");
 
     const planSpy = vi.spyOn(RomMImportStrategy.prototype, "planImport").mockResolvedValue({

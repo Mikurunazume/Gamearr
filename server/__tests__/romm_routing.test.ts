@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { resolveRommPlatformDir, validateRommSlug } from "../services/RommRouting.js";
 import { RomMImportStrategy } from "../services/ImportStrategies.js";
-import type { Game, ImportConfig, RomMConfig } from "../../shared/schema.js";
+import { makeGame, makeImportConfig, makeRommConfig } from "./helpers/import-test-helpers.js";
 
 const tempRoots: string[] = [];
 
@@ -24,58 +24,7 @@ afterEach(async () => {
   }
 });
 
-function makeGame(title: string): Game {
-  return {
-    id: "g1",
-    title,
-    status: "wanted",
-    userId: "u1",
-    igdbId: 8,
-    steamAppid: null,
-    summary: null,
-    coverUrl: null,
-    releaseDate: null,
-    rating: null,
-    platforms: [8],
-    genres: null,
-    publishers: null,
-    developers: null,
-    screenshots: null,
-    hidden: false,
-    originalReleaseDate: null,
-    releaseStatus: null,
-    addedAt: null,
-    completedAt: null,
-  };
-}
-
-const importConfig: ImportConfig = {
-  enablePostProcessing: true,
-  autoUnpack: false,
-  renamePattern: "{Title}",
-  overwriteExisting: false,
-  transferMode: "move",
-  importPlatformIds: [],
-  ignoredExtensions: [".nfo"],
-  minFileSize: 0,
-  libraryRoot: "/data",
-};
-
-function makeRommConfig(root: string): RomMConfig {
-  return {
-    enabled: true,
-    libraryRoot: root,
-    platformRoutingMode: "slug-subfolder",
-    platformBindings: {},
-    moveMode: "copy",
-    conflictPolicy: "rename",
-    folderNamingTemplate: "{title}",
-    singleFilePlacement: "root",
-    multiFilePlacement: "subfolder",
-    includeRegionLanguageTags: false,
-    bindingMissingBehavior: "fallback",
-  };
-}
+const importConfig = makeImportConfig({ ignoredExtensions: [".nfo"] });
 
 describe("RomM routing", () => {
   it("validates fs_slug and rejects traversal", () => {
@@ -120,11 +69,11 @@ describe("RomM routing", () => {
     await fs.writeFile(path.join(source, "Game.cue"), "cue");
     await fs.writeFile(path.join(source, "Game.bin"), "bin");
 
-    const romm = makeRommConfig(path.join(root, "library"));
+    const romm = makeRommConfig({ libraryRoot: path.join(root, "library") });
     const strategy = new RomMImportStrategy("ps2");
     const plan = await strategy.planImport(
       source,
-      makeGame("Mega Game"),
+      makeGame({ title: "Mega Game", igdbId: 8, platforms: [8] }),
       romm.libraryRoot,
       importConfig,
       romm

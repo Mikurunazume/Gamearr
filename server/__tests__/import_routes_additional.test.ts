@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import express from "express";
 import request from "supertest";
 
 const { mockStorage, mockImportManager, mockPlatformMappingService, isSafeUrlMock } = vi.hoisted(
@@ -40,51 +39,24 @@ vi.mock("../ssrf.js", () => ({
 }));
 
 import { importRouter } from "../routes/import.js";
+import {
+  makeImportConfig,
+  makeRommConfig,
+  createImportTestApp,
+} from "./helpers/import-test-helpers.js";
 
 describe("importRouter additional coverage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockStorage.getEnabledDownloaders.mockResolvedValue([]);
-    mockStorage.getImportConfig.mockResolvedValue({
-      libraryRoot: "/data",
-      enablePostProcessing: true,
-      autoUnpack: false,
-      renamePattern: "{Title}",
-      overwriteExisting: true,
-      transferMode: "move",
-      importPlatformIds: [],
-      ignoredExtensions: [],
-      minFileSize: 0,
-    });
-    mockStorage.getRomMConfig.mockResolvedValue({
-      enabled: false,
-      libraryRoot: "/data/romm",
-      platformRoutingMode: "slug-subfolder",
-      platformBindings: {},
-      moveMode: "hardlink",
-      conflictPolicy: "rename",
-      folderNamingTemplate: "{title}",
-      singleFilePlacement: "root",
-      multiFilePlacement: "subfolder",
-      includeRegionLanguageTags: false,
-
-      bindingMissingBehavior: "fallback",
-    });
+    mockStorage.getImportConfig.mockResolvedValue(makeImportConfig({ overwriteExisting: true }));
+    mockStorage.getRomMConfig.mockResolvedValue(
+      makeRommConfig({ enabled: false, moveMode: "hardlink" })
+    );
     mockStorage.getPathMappings.mockResolvedValue([]);
   });
 
-  function createApp(withUser = true) {
-    const app = express();
-    app.use(express.json());
-    app.use((req, _res, next) => {
-      if (withUser) {
-        (req as express.Request & { user?: { id: string } }).user = { id: "user-1" };
-      }
-      next();
-    });
-    app.use("/api/imports", importRouter);
-    return app;
-  }
+  const createApp = (withUser = true) => createImportTestApp(importRouter, withUser);
 
   it("returns unauthorized for GET /config without user", async () => {
     const app = createApp(false);
