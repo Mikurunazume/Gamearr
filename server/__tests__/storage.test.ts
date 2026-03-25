@@ -322,12 +322,9 @@ describe("MemStorage", () => {
         minFileSize: 12,
         libraryRoot: "/library/a",
         rommEnabled: true,
-        rommUrl: "https://romm.local",
-        rommApiKey: "secret",
         rommLibraryRoot: "/library/a/romm",
         rommPlatformRoutingMode: "binding-map",
         rommPlatformBindings: { ps2: "Sony PlayStation 2" },
-        rommPlatformAliases: { playstation2: "ps2" },
         rommMoveMode: "copy",
         rommConflictPolicy: "overwrite",
         rommFolderNamingTemplate: "{title}",
@@ -371,8 +368,6 @@ describe("MemStorage", () => {
       const rommConfigA = await storage.getRomMConfig(userA.id);
       expect(rommConfigA).toEqual({
         enabled: true,
-        url: "https://romm.local",
-        apiKey: "secret",
         libraryRoot: "/library/a/romm",
         platformRoutingMode: "binding-map",
         platformBindings: { ps2: "Sony PlayStation 2" },
@@ -404,8 +399,6 @@ describe("MemStorage", () => {
       const rommConfig = await storage.getRomMConfig("missing-user");
       expect(rommConfig).toEqual({
         enabled: false,
-        url: undefined,
-        apiKey: undefined,
         libraryRoot: "/data",
         platformRoutingMode: "slug-subfolder",
         platformBindings: {},

@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { storage } from "../storage.js";
 import { importManager, platformMappingService } from "../services/index.js";
-import { isSafeUrl } from "../ssrf.js";
 
 import z from "zod";
 import {
@@ -49,8 +48,6 @@ const importConfigPatchSchema = z
 const rommConfigPatchSchema = z
   .object({
     enabled: z.boolean().optional(),
-    url: z.string().optional(),
-    apiKey: z.string().optional(),
     libraryRoot: z.string().min(1).max(1024).optional(),
     platformRoutingMode: rommPlatformRoutingModeSchema.optional(),
     platformBindings: z.record(z.string(), z.string()).optional(),
@@ -370,8 +367,6 @@ function buildRommPatchResponse(
 ) {
   return {
     enabled: updates.enabled ?? settings.rommEnabled,
-    url: (updates.url ?? settings.rommUrl)?.trim() || undefined,
-    apiKey: updates.apiKey ?? settings.rommApiKey ?? undefined,
     libraryRoot: updates.libraryRoot ?? settings.rommLibraryRoot ?? "/data",
     platformRoutingMode:
       updates.platformRoutingMode ?? settings.rommPlatformRoutingMode ?? "slug-subfolder",
@@ -390,45 +385,18 @@ function buildRommPatchResponse(
   };
 }
 
-async function validateRommUrl(
-  updates: z.infer<typeof rommConfigPatchSchema>
-): Promise<string | null> {
-  if (updates.url === undefined) return null;
-  const trimmedUrl = updates.url.trim();
-  if (!trimmedUrl) return "URL cannot be empty";
-  if (!(await isSafeUrl(trimmedUrl))) return "Unsafe URL";
-  updates.url = trimmedUrl;
-  return null;
-}
-
 importRouter.patch("/romm", async (req, res) => {
   try {
     const updates = rommConfigPatchSchema.parse(req.body);
     const userId = res.locals.userId as string;
-
-    // Validate URL if provided
-    const urlError = await validateRommUrl(updates);
-    if (urlError) {
-      return res.status(400).json({ error: urlError });
-    }
 
     const settings = await storage.getUserSettings(userId);
     if (!settings) {
       return res.status(404).json({ error: "Settings not found" });
     }
 
-    // If enabling RomM, an effective URL must exist
-    if (updates.enabled) {
-      const effectiveUrl = updates.url || settings.rommUrl?.trim();
-      if (!effectiveUrl) {
-        return res.status(400).json({ error: "URL is required to enable RomM" });
-      }
-    }
-
     const updated = await storage.updateUserSettings(userId, {
       rommEnabled: updates.enabled,
-      rommUrl: updates.url,
-      rommApiKey: updates.apiKey,
       rommLibraryRoot: updates.libraryRoot,
       rommPlatformRoutingMode: updates.platformRoutingMode,
       rommPlatformBindings: updates.platformBindings,

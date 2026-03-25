@@ -63,8 +63,6 @@ export const userSettings = sqliteTable("user_settings", {
   libraryRoot: text("library_root").notNull().default("/data"),
   // RomM Settings
   rommEnabled: integer("romm_enabled", { mode: "boolean" }).notNull().default(false),
-  rommUrl: text("romm_url"),
-  rommApiKey: text("romm_api_key"),
   rommLibraryRoot: text("romm_library_root").notNull().default("/data"),
   rommPlatformRoutingMode: text("romm_platform_routing_mode").notNull().default("slug-subfolder"),
   rommPlatformBindings: text("romm_platform_bindings", { mode: "json" })
@@ -145,8 +143,6 @@ export const rommSingleFilePlacementSchema = z.enum(ROMM_SINGLE_FILE_PLACEMENTS)
 export const rommBindingMissingBehaviorSchema = z.enum(ROMM_BINDING_MISSING_BEHAVIORS);
 
 const rommConfigBaseSchema = z.object({
-  url: z.string().optional(),
-  apiKey: z.string().optional(),
   libraryRoot: z.string().min(1),
   platformRoutingMode: rommPlatformRoutingModeSchema,
   platformBindings: z.record(z.string(), z.string()),
@@ -180,8 +176,6 @@ export type RomMConfig = z.infer<typeof rommConfigSchema>;
 
 export interface RomMConfigInput {
   enabled: boolean;
-  url?: string;
-  apiKey?: string;
   libraryRoot: string;
   platformRoutingMode: RomMPlatformRoutingMode;
   platformBindings: Record<string, string>;

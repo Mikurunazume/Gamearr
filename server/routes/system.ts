@@ -5,7 +5,7 @@ import { storage } from "../storage.js";
 
 // Allow browsing the entire container filesystem
 // Security is maintained by container isolation and explicit volume mounts
-const FILE_BROWSER_ROOT = "/";
+const FILE_BROWSER_ROOT = path.resolve("/");
 
 export const systemRouter = Router();
 

@@ -1,29 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 
-const { mockStorage, mockImportManager, mockPlatformMappingService, isSafeUrlMock } = vi.hoisted(
-  () => ({
-    mockStorage: {
-      getImportConfig: vi.fn(),
-      getEnabledDownloaders: vi.fn(),
-      getPendingImportReviews: vi.fn(),
-      getGame: vi.fn(),
-      getPlatformMappings: vi.fn(),
-      getPathMappings: vi.fn(),
-      removePathMapping: vi.fn(),
-      getUserSettings: vi.fn(),
-      updateUserSettings: vi.fn(),
-      getRomMConfig: vi.fn(),
-    },
-    mockImportManager: {
-      confirmImport: vi.fn(),
-    },
-    mockPlatformMappingService: {
-      initializeDefaults: vi.fn(),
-    },
-    isSafeUrlMock: vi.fn(),
-  })
-);
+const { mockStorage, mockImportManager, mockPlatformMappingService } = vi.hoisted(() => ({
+  mockStorage: {
+    getImportConfig: vi.fn(),
+    getEnabledDownloaders: vi.fn(),
+    getPendingImportReviews: vi.fn(),
+    getGame: vi.fn(),
+    getPlatformMappings: vi.fn(),
+    getPathMappings: vi.fn(),
+    removePathMapping: vi.fn(),
+    getUserSettings: vi.fn(),
+    updateUserSettings: vi.fn(),
+    getRomMConfig: vi.fn(),
+  },
+  mockImportManager: {
+    confirmImport: vi.fn(),
+  },
+  mockPlatformMappingService: {
+    initializeDefaults: vi.fn(),
+  },
+}));
 
 vi.mock("../storage.js", () => ({
   storage: mockStorage,
@@ -32,10 +29,6 @@ vi.mock("../storage.js", () => ({
 vi.mock("../services/index.js", () => ({
   importManager: mockImportManager,
   platformMappingService: mockPlatformMappingService,
-}));
-
-vi.mock("../ssrf.js", () => ({
-  isSafeUrl: isSafeUrlMock,
 }));
 
 import { importRouter } from "../routes/import.js";
@@ -104,48 +97,6 @@ describe("importRouter additional coverage", () => {
     expect(response.body.count).toBe(1);
   });
 
-  it("rejects unsafe RomM URL in PATCH /romm", async () => {
-    isSafeUrlMock.mockResolvedValue(false);
-    const app = createApp();
-
-    const response = await request(app).patch("/api/imports/romm").send({
-      enabled: true,
-      url: "http://169.254.169.254/latest/meta-data/", // NOSONAR - intentional SSRF test URL
-      apiKey: "k",
-    });
-
-    expect(response.status).toBe(400);
-    expect(response.body.error).toMatch(/unsafe/i);
-  });
-
-  it("rejects empty RomM URL in PATCH /romm", async () => {
-    const app = createApp();
-
-    const response = await request(app).patch("/api/imports/romm").send({
-      url: "   ",
-    });
-
-    expect(response.status).toBe(400);
-  });
-
-  it("rejects enabling RomM without an effective URL", async () => {
-    mockStorage.getUserSettings.mockResolvedValue({
-      id: "settings-1",
-      userId: "user-1",
-      rommEnabled: false,
-      rommUrl: null,
-      rommApiKey: null,
-    });
-
-    const app = createApp();
-    const response = await request(app).patch("/api/imports/romm").send({
-      enabled: true,
-    });
-
-    expect(response.status).toBe(400);
-    expect(response.body.error).toMatch(/URL is required/i);
-  });
-
   it("returns 400 for invalid /config patch payload", async () => {
     const app = createApp();
 
@@ -171,8 +122,6 @@ describe("importRouter additional coverage", () => {
       id: "settings-1",
       userId: "user-1",
       rommEnabled: false,
-      rommUrl: null,
-      rommApiKey: null,
     });
     mockStorage.updateUserSettings.mockResolvedValue({ id: "settings-1", userId: "user-1" });
 
@@ -193,17 +142,13 @@ describe("importRouter additional coverage", () => {
       id: "settings-1",
       userId: "user-1",
       rommEnabled: false,
-      rommUrl: null,
-      rommApiKey: null,
     });
     mockStorage.updateUserSettings.mockResolvedValue({ id: "settings-1", userId: "user-1" });
-    isSafeUrlMock.mockResolvedValue(true);
 
     const app = createApp();
     const response = await request(app).patch("/api/imports/romm").send({
       enabled: true,
-      url: "http://localhost:8080",
-      apiKey: "test-key",
+      libraryRoot: "/data/romm",
     });
 
     expect(response.status).toBe(200);
@@ -211,8 +156,7 @@ describe("importRouter additional coverage", () => {
       "user-1",
       expect.objectContaining({
         rommEnabled: true,
-        rommUrl: "http://localhost:8080",
-        rommApiKey: "test-key",
+        rommLibraryRoot: "/data/romm",
       })
     );
   });

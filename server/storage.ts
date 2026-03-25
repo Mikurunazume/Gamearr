@@ -101,12 +101,9 @@ function buildRomMConfigFromSettings(
   settings?: Pick<
     UserSettings,
     | "rommEnabled"
-    | "rommUrl"
-    | "rommApiKey"
     | "rommLibraryRoot"
     | "rommPlatformRoutingMode"
     | "rommPlatformBindings"
-    | "rommPlatformAliases"
     | "rommMoveMode"
     | "rommConflictPolicy"
     | "rommFolderNamingTemplate"
@@ -116,12 +113,8 @@ function buildRomMConfigFromSettings(
     | "rommBindingMissingBehavior"
   >
 ): RomMConfig {
-  const trimmedUrl = settings?.rommUrl?.trim();
-
   const candidate: RomMConfigInput = {
-    enabled: Boolean(settings?.rommEnabled && trimmedUrl),
-    url: trimmedUrl || undefined,
-    apiKey: settings?.rommApiKey ?? undefined,
+    enabled: Boolean(settings?.rommEnabled),
     libraryRoot: settings?.rommLibraryRoot ?? "/data",
     platformRoutingMode:
       (settings?.rommPlatformRoutingMode as RomMConfigInput["platformRoutingMode"]) ??
@@ -145,8 +138,6 @@ function buildRomMConfigFromSettings(
 
   return {
     enabled: false,
-    url: trimmedUrl || undefined,
-    apiKey: settings?.rommApiKey ?? undefined,
     libraryRoot: settings?.rommLibraryRoot ?? "/data",
     platformRoutingMode: "slug-subfolder",
     platformBindings: settings?.rommPlatformBindings ?? {},
@@ -957,8 +948,6 @@ export class MemStorage implements IStorage {
 
       // RomM Defaults
       rommEnabled: insertSettings.rommEnabled ?? false,
-      rommUrl: insertSettings.rommUrl ?? null,
-      rommApiKey: insertSettings.rommApiKey ?? null,
       rommLibraryRoot: insertSettings.rommLibraryRoot ?? "/data",
       rommPlatformRoutingMode: insertSettings.rommPlatformRoutingMode ?? "slug-subfolder",
       rommPlatformBindings: insertSettings.rommPlatformBindings ?? {},
