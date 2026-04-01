@@ -28,6 +28,40 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 type SortOption = "release-asc" | "release-desc" | "added-desc" | "title-asc";
 
+// ⚡ Bolt: Move sortGames outside of the component to prevent it from being recreated
+// on every render, which would break the `useMemo` dependencies below if it were
+// included in the dependency array.
+export const sortGames = (gameList: Game[], currentSortBy: SortOption): Game[] => {
+  const sorted = [...gameList];
+
+  return sorted.sort((a, b) => {
+    switch (currentSortBy) {
+      case "release-asc": {
+        if (!a.releaseDate && !b.releaseDate) return 0;
+        if (!a.releaseDate) return 1;
+        if (!b.releaseDate) return -1;
+        return new Date(a.releaseDate).getTime() - new Date(b.releaseDate).getTime();
+      }
+      case "release-desc": {
+        if (!a.releaseDate && !b.releaseDate) return 0;
+        if (!a.releaseDate) return 1;
+        if (!b.releaseDate) return -1;
+        return new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime();
+      }
+      case "added-desc": {
+        if (!a.addedAt && !b.addedAt) return 0;
+        if (!a.addedAt) return 1;
+        if (!b.addedAt) return -1;
+        return new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime();
+      }
+      case "title-asc":
+        return a.title.localeCompare(b.title);
+      default:
+        return 0;
+    }
+  });
+};
+
 export default function WishlistPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -87,35 +121,19 @@ export default function WishlistPage() {
     return { releasedGames: released, upcomingGames: upcoming, tbaGames: tba };
   }, [wishlistGames]);
 
-  // Sort games based on selected option
-  const sortGames = (gameList: Game[]): Game[] => {
-    const sorted = [...gameList];
+  // ⚡ Bolt: Memoize the sorted arrays to prevent re-sorting on every render
+  // previously, `sortGames()` was called directly in the JSX render function
+  const sortedUpcomingGames = useMemo(() => {
+    return sortGames(upcomingGames, sortBy);
+  }, [upcomingGames, sortBy]);
 
-    switch (sortBy) {
-      case "release-asc":
-        return sorted.sort((a, b) => {
-          if (!a.releaseDate) return 1;
-          if (!b.releaseDate) return -1;
-          return new Date(a.releaseDate).getTime() - new Date(b.releaseDate).getTime();
-        });
-      case "release-desc":
-        return sorted.sort((a, b) => {
-          if (!a.releaseDate) return 1;
-          if (!b.releaseDate) return -1;
-          return new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime();
-        });
-      case "added-desc":
-        return sorted.sort((a, b) => {
-          if (!a.addedAt) return 1;
-          if (!b.addedAt) return -1;
-          return new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime();
-        });
-      case "title-asc":
-        return sorted.sort((a, b) => a.title.localeCompare(b.title));
-      default:
-        return sorted;
-    }
-  };
+  const sortedReleasedGames = useMemo(() => {
+    return sortGames(releasedGames, sortBy);
+  }, [releasedGames, sortBy]);
+
+  const sortedTbaGames = useMemo(() => {
+    return sortGames(tbaGames, sortBy);
+  }, [tbaGames, sortBy]);
 
   const statusMutation = useMutation({
     mutationFn: async ({ gameId, status }: { gameId: string; status: GameStatus }) => {
@@ -227,7 +245,7 @@ export default function WishlistPage() {
                 <Badge variant="default">{upcomingGames.length}</Badge>
               </div>
               <GameGrid
-                games={sortGames(upcomingGames)}
+                games={sortedUpcomingGames}
                 onStatusChange={(id, status) => statusMutation.mutate({ gameId: id, status })}
                 isLoading={isLoading}
                 viewMode={viewMode}
@@ -247,7 +265,7 @@ export default function WishlistPage() {
                 </Badge>
               </div>
               <GameGrid
-                games={sortGames(releasedGames)}
+                games={sortedReleasedGames}
                 onStatusChange={(id, status) => statusMutation.mutate({ gameId: id, status })}
                 isLoading={isLoading}
                 viewMode={viewMode}
@@ -265,7 +283,7 @@ export default function WishlistPage() {
                 <Badge variant="secondary">{tbaGames.length}</Badge>
               </div>
               <GameGrid
-                games={sortGames(tbaGames)}
+                games={sortedTbaGames}
                 onStatusChange={(id, status) => statusMutation.mutate({ gameId: id, status })}
                 isLoading={isLoading}
                 viewMode={viewMode}
