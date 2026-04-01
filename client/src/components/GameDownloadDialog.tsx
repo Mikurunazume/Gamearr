@@ -55,6 +55,7 @@ import {
   ArrowUp,
   ArrowDown,
   Activity,
+  Ban,
 } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
@@ -67,7 +68,7 @@ import {
   downloadRulesSchema,
 } from "@shared/schema";
 import { groupDownloadsByCategory, type DownloadCategory } from "@shared/download-categorizer";
-import { parseReleaseMetadata } from "@shared/title-utils";
+import { parseReleaseMetadata, parseJsonStringArray } from "@shared/title-utils";
 
 interface DownloadItem {
   title: string;
@@ -113,12 +114,14 @@ function formatDate(dateString: string): string {
 }
 
 import { apiRequest } from "@/lib/queryClient";
+import { useDebounce } from "@/hooks/use-debounce";
 import { formatBytes, formatAge, isUsenetItem } from "@/lib/downloads-utils";
 
 export default function GameDownloadDialog({ game, open, onOpenChange }: GameDownloadDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery, 300);
   const [downloadingGuid, setDownloadingGuid] = useState<string | null>(null);
   const [showBundleDialog, setShowBundleDialog] = useState(false);
   const [selectedMainDownload, setSelectedMainDownload] = useState<DownloadItem | null>(null);
@@ -170,7 +173,17 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
         console.warn("Failed to apply download rules from settings", error);
       }
     }
-  }, [userSettings?.downloadRules]);
+    if (userSettings?.filterByPreferredGroups) {
+      const groups = parseJsonStringArray(userSettings.preferredReleaseGroups);
+      if (groups.length > 0) {
+        setSelectedGroups(groups);
+      }
+    }
+  }, [
+    userSettings?.downloadRules,
+    userSettings?.filterByPreferredGroups,
+    userSettings?.preferredReleaseGroups,
+  ]);
 
   // Auto-populate search when dialog opens with game title
   useEffect(() => {
@@ -182,9 +195,13 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
     }
   }, [open, game, applyDownloadRules, setDefaults]);
 
+  const searchQueryKey = game?.id
+    ? `/api/search?query=${encodeURIComponent(debouncedSearchQuery)}&gameId=${game.id}`
+    : `/api/search?query=${encodeURIComponent(debouncedSearchQuery)}`;
+
   const { data: searchResults, isLoading: isSearching } = useQuery<SearchResult>({
-    queryKey: [`/api/search?query=${encodeURIComponent(searchQuery)}`],
-    enabled: open && searchQuery.trim().length > 0,
+    queryKey: [searchQueryKey],
+    enabled: open && debouncedSearchQuery.trim().length > 0,
   });
 
   const { data: enabledIndexers } = useQuery<Indexer[]>({
@@ -357,6 +374,26 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
         description: error.message,
         variant: "destructive",
       });
+    },
+  });
+
+  const blacklistMutation = useMutation({
+    mutationFn: async (item: DownloadItem) => {
+      if (!game) throw new Error("No game context");
+      await apiRequest("POST", `/api/games/${game.id}/blacklist`, {
+        releaseTitle: item.title,
+        indexerName: item.indexerName ?? null,
+      });
+    },
+    onSuccess: (_data, item) => {
+      queryClient.setQueryData<SearchResult>([searchQueryKey], (old) => {
+        if (!old) return old;
+        return { ...old, items: old.items.filter((i) => i.title !== item.title) };
+      });
+      toast({ description: "Release blacklisted" });
+    },
+    onError: () => {
+      toast({ variant: "destructive", description: "Failed to blacklist release" });
     },
   });
 
@@ -1017,6 +1054,13 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                                             </DropdownMenuSub>
                                           );
                                         })()}
+                                        <DropdownMenuItem
+                                          onClick={() => blacklistMutation.mutate(download)}
+                                          className="text-destructive focus:text-destructive"
+                                        >
+                                          <Ban className="h-4 w-4 mr-2" />
+                                          Blacklist release
+                                        </DropdownMenuItem>
                                       </DropdownMenuContent>
                                     </DropdownMenu>
                                   </div>

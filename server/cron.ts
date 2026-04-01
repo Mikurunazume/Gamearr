@@ -3,12 +3,17 @@ import { igdbClient } from "./igdb.js";
 import { igdbLogger } from "./logger.js";
 import { notifyUser } from "./socket.js";
 import { DownloaderManager } from "./downloaders.js";
-import { searchAllIndexers } from "./search.js";
+import { searchAllIndexers, filterBlacklistedReleases } from "./search.js";
 import { xrelClient, DEFAULT_XREL_BASE } from "./xrel.js";
 import { steamService } from "./steam.js";
 import { downloadRulesSchema, type Game, type InsertNotification } from "../shared/schema.js";
 import { categorizeDownload } from "../shared/download-categorizer.js";
-import { releaseMatchesGame, normalizeTitle, cleanReleaseName } from "../shared/title-utils.js";
+import {
+  releaseMatchesGame,
+  normalizeTitle,
+  cleanReleaseName,
+  parseJsonStringArray,
+} from "../shared/title-utils.js";
 
 const DELAY_THRESHOLD_DAYS = 7;
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -85,8 +90,20 @@ function categorizeSearchItems(
   );
 }
 
+function applyPreferredGroupsFilter(
+  items: Awaited<ReturnType<typeof searchAllIndexers>>["items"],
+  preferredGroups: string[]
+): Awaited<ReturnType<typeof searchAllIndexers>>["items"] {
+  if (preferredGroups.length === 0) return items;
+  const filtered = items.filter(
+    (item) =>
+      item.group && preferredGroups.some((g) => g.toLowerCase() === item.group!.toLowerCase())
+  );
+  return filtered.length > 0 ? filtered : items;
+}
+
 async function searchAndCategorizeItemsForGame(
-  game: Pick<Game, "title">,
+  game: Pick<Game, "id" | "title">,
   downloadRules: string | null
 ): Promise<AutoSearchCategorizedItems | null> {
   const { items, errors } = await searchAllIndexers({
@@ -131,6 +148,18 @@ async function searchAndCategorizeItemsForGame(
     return null;
   }
 
+  // Filter out blacklisted releases
+  const blacklisted = await storage.getReleaseBlacklistSet(game.id);
+  const nonBlacklisted = filterBlacklistedReleases(matchedItems, blacklisted);
+
+  if (nonBlacklisted.length === 0) {
+    igdbLogger.debug(
+      { gameTitle: game.title, matchedCount: matchedItems.length },
+      "All matched items were blacklisted"
+    );
+    return null;
+  }
+
   let rules: AutoSearchRules;
   try {
     rules = getAutoSearchRules(downloadRules);
@@ -139,7 +168,7 @@ async function searchAndCategorizeItemsForGame(
     rules = getAutoSearchRules(null);
   }
 
-  return categorizeSearchItems(matchedItems, rules);
+  return categorizeSearchItems(nonBlacklisted, rules);
 }
 
 export function startCronJobs() {
@@ -574,6 +603,8 @@ export async function checkAutoSearch() {
 
         let gamesWithResults = 0;
 
+        const preferredGroups = parseJsonStringArray(settings.preferredReleaseGroups);
+
         for (const game of wantedGames) {
           try {
             // Skip unreleased games if configured to do so
@@ -595,7 +626,8 @@ export async function checkAutoSearch() {
 
             gamesWithResults++;
 
-            const { mainItems } = searchResult;
+            // Filter by preferred release groups if configured
+            const mainItems = applyPreferredGroupsFilter(searchResult.mainItems, preferredGroups);
 
             // Handle main items
             if (mainItems.length === 0) {
@@ -631,11 +663,12 @@ export async function checkAutoSearch() {
                       await storage.updateGameStatus(game.id, { status: "downloading" });
 
                       // Notify success
+                      const groupSuffix = item.group ? ` [${item.group}]` : "";
                       const notification = await storage.addNotification({
                         userId,
                         type: "success",
                         title: "Download Started",
-                        message: `Started downloading ${game.title} via ${item.downloadType === "usenet" ? "Usenet" : "Torrent"}`,
+                        message: `Started downloading ${game.title}${groupSuffix} via ${item.downloadType === "usenet" ? "Usenet" : "Torrent"}`,
                         link: "/library",
                       });
                       notifyUser("notification", notification);
@@ -694,7 +727,10 @@ export async function checkAutoSearch() {
               continue;
             }
 
-            const { updateItems } = searchResult;
+            const updateItems = applyPreferredGroupsFilter(
+              searchResult.updateItems,
+              preferredGroups
+            );
 
             if (updateItems.length > 0 && settings.notifyUpdates) {
               const notification = await storage.addNotification({
