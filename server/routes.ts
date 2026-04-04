@@ -1030,6 +1030,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   coverUrl: updatedData.coverUrl as string,
                   screenshots: updatedData.screenshots as string[],
                   releaseDate: updatedData.releaseDate as string,
+                  igdbWebsites: updatedData.igdbWebsites as Array<{
+                    url: string;
+                    category: number;
+                  }>,
+                  aggregatedRating: updatedData.aggregatedRating as number | undefined,
                 },
               });
             }
@@ -1086,6 +1091,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         routesLogger.error({ error }, "error removing game");
         res.status(500).json({ error: "Failed to remove game" });
+      }
+    }
+  );
+
+  // Get downloads for a specific game
+  app.get(
+    "/api/games/:id/downloads",
+    sanitizeGameId,
+    validateRequest,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const game = await resolveOwnedGame(req.params.id, userId, res);
+        if (!game) return;
+        const downloads = await storage.getDownloadsByGameId(req.params.id);
+        res.json(downloads);
+      } catch (error) {
+        routesLogger.error({ error }, "error fetching game downloads");
+        res.status(500).json({ error: "Failed to fetch game downloads" });
       }
     }
   );

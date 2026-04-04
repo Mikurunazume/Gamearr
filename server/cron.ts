@@ -962,6 +962,7 @@ async function addNewSteamWishlistGames(
       developers: formatted.developers as string[],
       publishers: formatted.publishers as string[],
       screenshots: formatted.screenshots as string[],
+      source: "steam",
       hidden: false,
     });
     addedGames.push({
