@@ -64,6 +64,20 @@
       "when": 1774730644852,
       "tag": "0008_ambiguous_tomorrow_man",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1774730644853,
+      "tag": "0009_game_metadata_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1774730644854,
+      "tag": "0010_preferred_release_groups",
+      "breakpoints": true
     }
   ]
 }
