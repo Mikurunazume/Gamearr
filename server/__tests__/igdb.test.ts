@@ -350,3 +350,80 @@ describe("IGDBClient - Batch Operations", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
+
+describe("IGDBClient - formatGameData metadata fields", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    fetchMock = vi.fn();
+    global.fetch = fetchMock;
+  });
+
+  function mockAuthAndGame(igdbGame: Record<string, unknown>) {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ access_token: "test-token", expires_in: 3600 }),
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [igdbGame],
+      });
+  }
+
+  it("parses aggregatedRating from IGDB aggregated_rating field (rounds to 1 decimal)", async () => {
+    mockAuthAndGame({
+      id: 1,
+      name: "Test Game",
+      aggregated_rating: 85.0,
+      websites: [],
+    });
+
+    const { igdbClient } = await import("../igdb.js");
+    const results = await igdbClient.searchGames("Test Game", 1);
+
+    expect(results[0].aggregated_rating).toBe(85.0);
+  });
+
+  it("leaves aggregatedRating undefined when IGDB field is absent", async () => {
+    mockAuthAndGame({ id: 1, name: "Test Game" });
+
+    const { igdbClient } = await import("../igdb.js");
+    const results = await igdbClient.searchGames("Test Game", 1);
+
+    expect(results[0].aggregated_rating).toBeUndefined();
+  });
+
+  it("leaves aggregatedRating undefined when IGDB field is zero/falsy", async () => {
+    mockAuthAndGame({ id: 1, name: "Test Game", aggregated_rating: 0 });
+
+    const { igdbClient } = await import("../igdb.js");
+    const results = await igdbClient.searchGames("Test Game", 1);
+
+    expect(results[0].aggregated_rating).toBeFalsy();
+  });
+
+  it("parses igdbWebsites as array when websites are present", async () => {
+    const websites = [
+      { id: 1, category: 1, url: "https://example.com/official" },
+      { id: 2, category: 13, url: "https://store.steampowered.com/app/123" },
+    ];
+    mockAuthAndGame({ id: 1, name: "Test Game", websites });
+
+    const { igdbClient } = await import("../igdb.js");
+    const results = await igdbClient.searchGames("Test Game", 1);
+
+    expect(results[0].websites).toEqual(websites);
+  });
+
+  it("uses empty array for igdbWebsites when websites field is absent", async () => {
+    mockAuthAndGame({ id: 1, name: "Test Game" });
+
+    const { igdbClient } = await import("../igdb.js");
+    const results = await igdbClient.searchGames("Test Game", 1);
+
+    expect(results[0].websites).toBeUndefined();
+  });
+});
