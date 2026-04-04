@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { asZodType, cn, compareEnabledPriorityName } from "@/lib/utils";
-import { Plus, Edit, Trash2, Check, X, Activity } from "lucide-react";
+import { Plus, Edit, Trash2, Check, X, Activity, ScanSearch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +37,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { insertDownloaderSchema, type Downloader, type InsertDownloader } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { getDownloadTypeColor } from "@/lib/downloads-utils";
+import DownloaderScanDialog from "@/components/DownloaderScanDialog";
 
 const downloaderTypes = [
   { value: "transmission", label: "Transmission", protocol: "torrent" },
@@ -58,6 +59,7 @@ export default function DownloadersPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingDownloader, setEditingDownloader] = useState<Downloader | null>(null);
   const [testingDownloaderId, setTestingDownloaderId] = useState<string | null>(null);
+  const [scanningDownloader, setScanningDownloader] = useState<Downloader | null>(null);
 
   const { data: downloaders = [], isLoading } = useQuery<Downloader[]>({
     queryKey: ["/api/downloaders"],
@@ -372,6 +374,16 @@ export default function DownloadersPage() {
                       data-testid={`button-test-downloader-${downloader.id}`}
                     >
                       <Activity className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setScanningDownloader(downloader)}
+                      title="Scan for games to import"
+                      aria-label={`Scan ${downloader.name} for games`}
+                      data-testid={`button-scan-downloader-${downloader.id}`}
+                    >
+                      <ScanSearch className="h-4 w-4" />
                     </Button>
                     <Switch
                       checked={downloader.enabled}
@@ -926,6 +938,14 @@ export default function DownloadersPage() {
           </Form>
         </DialogContent>
       </Dialog>
+
+      {scanningDownloader && (
+        <DownloaderScanDialog
+          downloader={scanningDownloader}
+          open={true}
+          onClose={() => setScanningDownloader(null)}
+        />
+      )}
     </div>
   );
 }

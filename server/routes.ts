@@ -1893,6 +1893,186 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Scan downloader for games to import
+  app.get("/api/downloaders/:id/scan", async (req, res) => {
+    try {
+      const { id } = req.params;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const userId = (req as any).user.id;
+
+      const downloader = await storage.getDownloader(id);
+      if (!downloader) {
+        return res.status(404).json({ error: "Downloader not found" });
+      }
+
+      const downloads = await DownloaderManager.getScanList(downloader);
+
+      const userGames = await storage.getUserGames(userId, true);
+      const libraryIgdbIds = new Set(userGames.map((g) => g.igdbId).filter(Boolean));
+      const libraryTitles = new Set(userGames.map((g) => normalizeTitle(g.title)));
+
+      const scanItems = downloads.map((dl) => {
+        const cleanTitle = cleanReleaseName(dl.name);
+        const normalizedClean = normalizeTitle(cleanTitle);
+        const existingGame = userGames.find((g) => normalizeTitle(g.title) === normalizedClean);
+        return {
+          id: dl.id,
+          name: dl.name,
+          cleanTitle,
+          status: dl.status,
+          progress: dl.progress,
+          downloadHash: dl.id,
+          downloadType: dl.downloadType ?? "torrent",
+          alreadyInLibrary: libraryTitles.has(normalizedClean),
+          existingGameId: existingGame?.id,
+        };
+      });
+
+      res.json({ downloader: { id: downloader.id, name: downloader.name }, items: scanItems });
+    } catch (error) {
+      routesLogger.error({ error }, "error scanning downloader");
+      res.status(500).json({ error: "Failed to scan downloader" });
+    }
+  });
+
+  // Import games from a downloader scan
+  app.post("/api/downloaders/:id/import", async (req, res) => {
+    try {
+      const { id } = req.params;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const userId = (req as any).user.id;
+
+      const downloader = await storage.getDownloader(id);
+      if (!downloader) {
+        return res.status(404).json({ error: "Downloader not found" });
+      }
+
+      const { items } = req.body as {
+        items: Array<{
+          downloadId: string;
+          downloadHash: string;
+          downloadName: string;
+          downloadType?: string;
+          igdbId?: number;
+          igdbGameData?: {
+            title: string;
+            igdbId: number;
+            coverUrl?: string;
+            releaseDate?: string;
+            summary?: string;
+            platforms?: string[];
+            genres?: string[];
+            publishers?: string[];
+            developers?: string[];
+            screenshots?: string[];
+            rating?: number;
+          };
+          customTitle: string;
+          status: string;
+          progress: number;
+        }>;
+      };
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: "items array is required" });
+      }
+
+      const userGames = await storage.getUserGames(userId, true);
+      const libraryIgdbIds = new Set(
+        userGames.map((g) => g.igdbId).filter((id): id is number => id != null)
+      );
+      const libraryTitles = new Set(userGames.map((g) => normalizeTitle(g.title)));
+
+      let imported = 0;
+      let skipped = 0;
+      const errors: string[] = [];
+
+      const source = `Imported from ${downloader.name}`;
+
+      for (const item of items) {
+        try {
+          const isCompleted =
+            item.progress >= 100 || ["completed", "seeding"].includes(item.status);
+          const gameStatus = isCompleted ? "owned" : "downloading";
+
+          // Dedup by igdbId
+          if (item.igdbId && libraryIgdbIds.has(item.igdbId)) {
+            skipped++;
+            continue;
+          }
+
+          // Dedup by title
+          const normalizedTitle = normalizeTitle(item.customTitle);
+          if (libraryTitles.has(normalizedTitle)) {
+            skipped++;
+            continue;
+          }
+
+          let gameData: Parameters<typeof storage.addGame>[0];
+
+          if (item.igdbGameData) {
+            gameData = insertGameSchema.parse({
+              userId,
+              title: item.igdbGameData.title,
+              igdbId: item.igdbGameData.igdbId,
+              status: gameStatus,
+              platform: "PC",
+              platforms: item.igdbGameData.platforms,
+              genres: item.igdbGameData.genres,
+              coverUrl: item.igdbGameData.coverUrl,
+              releaseDate: item.igdbGameData.releaseDate,
+              summary: item.igdbGameData.summary,
+              publishers: item.igdbGameData.publishers,
+              developers: item.igdbGameData.developers,
+              screenshots: item.igdbGameData.screenshots,
+              rating: item.igdbGameData.rating,
+              source,
+            });
+          } else {
+            gameData = insertGameSchema.parse({
+              userId,
+              title: item.customTitle,
+              status: gameStatus,
+              platform: "PC",
+              source,
+            });
+          }
+
+          const game = await storage.addGame(gameData);
+          if (game.igdbId != null) libraryIgdbIds.add(game.igdbId);
+          libraryTitles.add(normalizeTitle(game.title));
+
+          if (gameStatus === "downloading") {
+            await storage.addGameDownload({
+              gameId: game.id,
+              downloaderId: downloader.id,
+              downloadHash: item.downloadHash,
+              downloadTitle: item.downloadName,
+              status: "downloading",
+              downloadType: (item.downloadType as "torrent" | "usenet") ?? "torrent",
+            });
+          }
+
+          imported++;
+        } catch (itemError) {
+          errors.push(
+            `Failed to import "${item.customTitle}": ${itemError instanceof Error ? itemError.message : "Unknown error"}`
+          );
+        }
+      }
+
+      routesLogger.info(
+        { userId, downloaderId: id, imported, skipped, errors: errors.length },
+        "Downloader scan import completed"
+      );
+
+      res.json({ imported, skipped, errors });
+    } catch (error) {
+      routesLogger.error({ error }, "error importing from downloader scan");
+      res.status(500).json({ error: "Failed to import games" });
+    }
+  });
+
   // Add download to downloader
   app.post(
     "/api/downloaders/:id/downloads",

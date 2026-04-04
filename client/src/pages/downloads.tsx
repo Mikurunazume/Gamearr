@@ -32,6 +32,7 @@ import {
   Info,
   Download,
   Newspaper,
+  ScanSearch,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,6 +47,8 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import DownloadDetailsModal from "@/components/DownloadDetailsModal";
+import DownloaderScanDialog from "@/components/DownloaderScanDialog";
+import type { Downloader } from "@shared/schema";
 
 interface DownloadStatus {
   id: string;
@@ -89,6 +92,11 @@ export default function Downloads() {
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<DownloadStatusType | "all">("all");
   const [typeFilter, setTypeFilter] = useState<DownloadType | "all">("all");
+  const [scanningDownloader, setScanningDownloader] = useState<Downloader | null>(null);
+
+  const { data: downloaders = [] } = useQuery<Downloader[]>({
+    queryKey: ["/api/downloaders"],
+  });
 
   const {
     data: downloadsData,
@@ -310,10 +318,33 @@ export default function Downloads() {
           <h1 className="text-3xl font-bold">Downloads</h1>
           <p className="text-muted-foreground">Monitor and manage active downloads</p>
         </div>
-        <Button variant="outline" onClick={() => refetch()} data-testid="button-refresh">
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {downloaders.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline">
+                  <ScanSearch className="h-4 w-4 mr-2" />
+                  Scan & Import
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {downloaders.map((dl) => (
+                  <DropdownMenuItem
+                    key={dl.id}
+                    onClick={() => setScanningDownloader(dl)}
+                    aria-label={`Scan ${dl.name} for games`}
+                  >
+                    {dl.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <Button variant="outline" onClick={() => refetch()} data-testid="button-refresh">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Status filter tabs */}
@@ -630,6 +661,14 @@ export default function Downloads() {
           downloadName={selectedDownload.name}
           open={detailsModalOpen}
           onOpenChange={setDetailsModalOpen}
+        />
+      )}
+
+      {scanningDownloader && (
+        <DownloaderScanDialog
+          downloader={scanningDownloader}
+          open={true}
+          onClose={() => setScanningDownloader(null)}
         />
       )}
     </div>

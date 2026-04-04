@@ -127,6 +127,7 @@ interface DownloaderClient {
   getDownloadStatus(id: string): Promise<DownloadStatus | null>;
   getDownloadDetails(id: string): Promise<DownloadDetails | null>;
   getAllDownloads(): Promise<DownloadStatus[]>;
+  getScanList(): Promise<DownloadStatus[]>;
   pauseDownload(id: string): Promise<{ success: boolean; message: string }>;
   resumeDownload(id: string): Promise<{ success: boolean; message: string }>;
   removeDownload(id: string, deleteFiles?: boolean): Promise<{ success: boolean; message: string }>;
@@ -466,6 +467,10 @@ export class TransmissionClient implements DownloaderClient {
     }
 
     return [];
+  }
+
+  async getScanList(): Promise<DownloadStatus[]> {
+    return this.getAllDownloads();
   }
 
   async pauseDownload(id: string): Promise<{ success: boolean; message: string }> {
@@ -1254,6 +1259,10 @@ export class RTorrentClient implements DownloaderClient {
     }
 
     return [];
+  }
+
+  async getScanList(): Promise<DownloadStatus[]> {
+    return this.getAllDownloads();
   }
 
   async pauseDownload(id: string): Promise<{ success: boolean; message: string }> {
@@ -2497,6 +2506,10 @@ export class QBittorrentClient implements DownloaderClient {
     }
   }
 
+  async getScanList(): Promise<DownloadStatus[]> {
+    return this.getAllDownloads();
+  }
+
   async pauseDownload(id: string): Promise<{ success: boolean; message: string }> {
     try {
       await this.authenticate();
@@ -3134,6 +3147,11 @@ export class DownloaderManager {
     return downloads;
   }
 
+  static async getScanList(downloader: Downloader): Promise<DownloadStatus[]> {
+    const client = this.createClient(downloader);
+    return client.getScanList();
+  }
+
   static async getDownloadStatus(
     downloader: Downloader,
     id: string
@@ -3714,6 +3732,62 @@ export class SABnzbdClient implements DownloaderClient {
     }
   }
 
+  async getScanList(): Promise<DownloadStatus[]> {
+    const results: DownloadStatus[] = [];
+
+    // Get active queue
+    try {
+      const queue = await this.getAllDownloads();
+      results.push(...queue);
+    } catch (error) {
+      downloadersLogger.warn({ error }, "Failed to get SABnzbd queue for scan");
+    }
+
+    // Get completed history
+    try {
+      const url = this.getApiUrl("history", { limit: "1000" });
+      const response = await this.fetchWithFallback(url);
+      const data = await response.json();
+      const history: SABnzbdHistory = data.history;
+
+      for (const item of history.slots) {
+        let status: DownloadStatus["status"];
+        let repairStatus: DownloadStatus["repairStatus"];
+        let unpackStatus: DownloadStatus["unpackStatus"];
+
+        if (item.status === "Completed") {
+          status = "completed";
+          repairStatus = "good";
+          unpackStatus = "completed";
+        } else if (item.status === "Failed") {
+          status = "error";
+          repairStatus = "failed";
+          unpackStatus = undefined;
+        } else {
+          status = "paused";
+        }
+
+        results.push({
+          id: item.nzo_id,
+          name: item.name,
+          downloadType: "usenet",
+          status,
+          progress: status === "completed" ? 100 : 0,
+          size: item.bytes,
+          downloaded: item.bytes,
+          category: item.category,
+          error: status === "error" ? item.fail_message : undefined,
+          repairStatus,
+          unpackStatus,
+        });
+      }
+    } catch (error) {
+      downloadersLogger.warn({ error }, "Failed to get SABnzbd history for scan");
+    }
+
+    return results;
+  }
+
   async pauseDownload(id: string): Promise<{ success: boolean; message: string }> {
     try {
       const url = this.getApiUrl("pause", { value: id });
@@ -4252,6 +4326,56 @@ export class NZBGetClient implements DownloaderClient {
       downloadersLogger.error({ error }, "Failed to get NZBGet queue");
       return [];
     }
+  }
+
+  async getScanList(): Promise<DownloadStatus[]> {
+    const results: DownloadStatus[] = [];
+
+    // Get active queue
+    try {
+      const queue = await this.getAllDownloads();
+      results.push(...queue);
+    } catch (error) {
+      downloadersLogger.warn({ error }, "Failed to get NZBGet queue for scan");
+    }
+
+    // Get completed history
+    try {
+      const history = (await this.makeXMLRPCRequest("history")) as NZBGetHistoryResult[];
+
+      for (const item of history) {
+        const isSuccess = item.Status === "SUCCESS/ALL" || item.Status.startsWith("SUCCESS");
+        const status: DownloadStatus["status"] = isSuccess ? "completed" : "error";
+
+        results.push({
+          id: item.NZBID.toString(),
+          name: item.Name,
+          downloadType: "usenet",
+          status,
+          progress: isSuccess ? 100 : 0,
+          size: item.FileSizeMB * 1024 * 1024,
+          downloaded: isSuccess ? item.FileSizeMB * 1024 * 1024 : 0,
+          category: item.Category,
+          error: !isSuccess ? item.Status : undefined,
+          repairStatus:
+            item.ParStatus === "SUCCESS"
+              ? "good"
+              : item.ParStatus === "FAILURE"
+                ? "failed"
+                : undefined,
+          unpackStatus:
+            item.UnpackStatus === "SUCCESS"
+              ? "completed"
+              : item.UnpackStatus === "FAILURE"
+                ? "failed"
+                : undefined,
+        });
+      }
+    } catch (error) {
+      downloadersLogger.warn({ error }, "Failed to get NZBGet history for scan");
+    }
+
+    return results;
   }
 
   async pauseDownload(id: string): Promise<{ success: boolean; message: string }> {
