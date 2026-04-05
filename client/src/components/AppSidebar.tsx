@@ -123,7 +123,8 @@ export default function AppSidebar({ activeItem = "/", onNavigate }: Readonly<Ap
     ["owned", "completed", "downloading"].includes(g.status)
   ).length;
   const wishlistCount = games.filter((g) => g.status === "wanted").length;
-  const activeDownloadsCount = downloadsData?.downloads?.length || 0;
+  const activeDownloadsCount =
+    downloadsData?.downloads?.filter((d) => d.status === "downloading").length || 0;
 
   const navigation = staticNavigation.map((item) => {
     let badge: string | undefined;
