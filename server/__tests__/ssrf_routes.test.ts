@@ -142,4 +142,19 @@ describe("SSRF Vulnerability in Routes", () => {
     expect(response.status).toBe(400);
     expect(response.body.error).toMatch(/Invalid or unsafe URL/);
   });
+
+  it.each([
+    "/api/downloaders/123/downloads",
+    "/api/downloads"
+  ])("should block unsafe URL in %s", async (endpoint) => {
+    const app = await createApp();
+
+    const response = await request(app).post(endpoint).send({
+      url: UNSAFE_URL,
+      title: "Test Download",
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/Invalid or unsafe URL/);
+  });
 });

@@ -1949,6 +1949,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).json({ error: "URL and title are required" });
         }
 
+        if (!(await isSafeUrl(url))) {
+          return res.status(400).json({ error: "Invalid or unsafe URL" });
+        }
+
         const downloader = await storage.getDownloader(id);
         if (!downloader) {
           return res.status(404).json({ error: "Downloader not found" });
@@ -2180,6 +2184,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         if (!url || !title) {
           return res.status(400).json({ error: "URL and title are required" });
+        }
+
+        if (!(await isSafeUrl(url))) {
+          return res.status(400).json({ error: "Invalid or unsafe URL" });
         }
 
         const enabledDownloaders = await storage.getEnabledDownloaders();
