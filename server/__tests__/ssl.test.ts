@@ -36,8 +36,8 @@ vi.mock("tls", () => ({
 describe("SSL Module", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.clearAllMocks();
     vi.restoreAllMocks();
+    vi.clearAllMocks();
 
     // Default successful mocks
     mocks.mkdir.mockImplementation(async (...args) => {

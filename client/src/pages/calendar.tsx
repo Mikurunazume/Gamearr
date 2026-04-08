@@ -9,7 +9,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import PageToolbar from "@/components/PageToolbar";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type Game, type Config } from "@shared/schema";
@@ -29,14 +28,13 @@ function formatDate(date: Date): string {
 }
 
 function getMonthName(month: number): string {
-  return new Date(2000, month, 1).toLocaleDateString(undefined, { month: "long" });
+  return new Date(2000, month, 1).toLocaleDateString("en-US", { month: "long" });
 }
 
 function getWeekDays(date: Date): Date[] {
   const day = date.getDay();
   const diff = date.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is sunday
-  const monday = new Date(date);
-  monday.setDate(diff);
+  const monday = new Date(date.setDate(diff));
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
@@ -169,43 +167,36 @@ export default function CalendarPage() {
 
   return (
     <div className="h-full overflow-auto p-6">
-      <div className="space-y-3 mb-6">
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Release Calendar</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">Track upcoming game releases</p>
+          <h1 className="text-3xl font-bold">Release Calendar</h1>
+          <p className="text-muted-foreground">Track upcoming game releases</p>
         </div>
-        <PageToolbar
-          filterPills={<span className="text-base font-semibold">{getTitle()}</span>}
-          actions={
-            <>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={navigatePrevious}
-                aria-label="Previous period"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </Button>
-              <Button variant="ghost" size="icon" onClick={navigateNext} aria-label="Next period">
-                <ChevronRight className="h-5 w-5" />
-              </Button>
-              <div className="w-px h-5 bg-border" />
-              <Button variant="outline" size="sm" onClick={goToToday}>
-                Today
-              </Button>
-              <Select value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
-                <SelectTrigger className="w-[110px] h-8 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="year">Year</SelectItem>
-                  <SelectItem value="month">Month</SelectItem>
-                  <SelectItem value="week">Week</SelectItem>
-                </SelectContent>
-              </Select>
-            </>
-          }
-        />
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={goToToday}>
+            Today
+          </Button>
+          <Select value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
+            <SelectTrigger className="w-[120px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="year">Year</SelectItem>
+              <SelectItem value="month">Month</SelectItem>
+              <SelectItem value="week">Week</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-6">
+        <Button variant="ghost" size="icon" onClick={navigatePrevious} aria-label="Previous period">
+          <ChevronLeft className="h-5 w-5" />
+        </Button>
+        <h2 className="text-2xl font-semibold">{getTitle()}</h2>
+        <Button variant="ghost" size="icon" onClick={navigateNext} aria-label="Next period">
+          <ChevronRight className="h-5 w-5" />
+        </Button>
       </div>
 
       {isLoading ? (
@@ -287,7 +278,7 @@ function YearView({
                 gamesInMonth.map(([date, games]) => (
                   <div key={date} className="text-sm">
                     <div className="text-muted-foreground mb-1">
-                      {new Date(date).toLocaleDateString(undefined, {
+                      {new Date(date).toLocaleDateString("en-US", {
                         month: "short",
                         day: "numeric",
                       })}
@@ -387,7 +378,7 @@ function WeekView({
           const dateKey = formatDate(day);
           const gamesOnDay = gamesByDate[dateKey] || [];
           const isToday = formatDate(new Date()) === dateKey;
-          const dayName = day.toLocaleDateString(undefined, { weekday: "short" });
+          const dayName = day.toLocaleDateString("en-US", { weekday: "short" });
 
           return (
             <div
@@ -400,7 +391,7 @@ function WeekView({
                   {day.getDate()}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {day.toLocaleDateString(undefined, { month: "short" })}
+                  {day.toLocaleDateString("en-US", { month: "short" })}
                 </div>
               </div>
               <div className="space-y-2">
@@ -435,11 +426,10 @@ function GameBadge({
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
-            type="button"
+          <div
             onClick={onClick}
             className={cn(
-              "flex items-center gap-1 p-1 rounded hover:opacity-80 transition-opacity w-full text-left",
+              "flex items-center gap-1 p-1 rounded hover:opacity-80 cursor-pointer transition-opacity",
               isDelayed ? "bg-destructive/20 border border-destructive/30" : "bg-muted"
             )}
           >
@@ -454,28 +444,28 @@ function GameBadge({
               {game.title}
               {isDelayed && " (Delayed)"}
             </span>
-          </button>
+          </div>
         </TooltipTrigger>
         <TooltipContent>
           <div className="max-w-xs">
             <p className="font-semibold">{game.title}</p>
             {isDelayed && (
-              <Badge variant="destructive" className="mt-1 text-xs h-4">
+              <Badge variant="destructive" className="mt-1 text-[10px] h-4">
                 Delayed
               </Badge>
             )}
             <p className="text-xs text-muted-foreground mt-1">
               {game.releaseDate &&
-                new Date(game.releaseDate).toLocaleDateString(undefined, {
+                new Date(game.releaseDate).toLocaleDateString("en-US", {
                   year: "numeric",
                   month: "long",
                   day: "numeric",
                 })}
             </p>
             {isDelayed && game.originalReleaseDate && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-[10px] text-muted-foreground">
                 Original:{" "}
-                {new Date(game.originalReleaseDate).toLocaleDateString(undefined, {
+                {new Date(game.originalReleaseDate).toLocaleDateString("en-US", {
                   month: "short",
                   day: "numeric",
                 })}
@@ -490,11 +480,10 @@ function GameBadge({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          type="button"
+        <div
           onClick={onClick}
           className={cn(
-            "flex items-center gap-2 p-2 rounded hover:opacity-80 transition-all w-full text-left",
+            "flex items-center gap-2 p-2 rounded hover:opacity-80 cursor-pointer transition-all",
             isDelayed ? "bg-destructive/10 border border-destructive/20" : "bg-muted"
           )}
         >
@@ -509,34 +498,34 @@ function GameBadge({
                 {game.title}
               </p>
               {isDelayed && (
-                <Badge variant="destructive" className="text-xs h-4 px-1">
+                <Badge variant="destructive" className="text-[10px] h-4 px-1">
                   Delayed
                 </Badge>
               )}
             </div>
             <p className="text-xs text-muted-foreground">
               {game.releaseDate &&
-                new Date(game.releaseDate).toLocaleDateString(undefined, {
+                new Date(game.releaseDate).toLocaleDateString("en-US", {
                   month: "short",
                   day: "numeric",
                   year: "numeric",
                 })}
             </p>
           </div>
-        </button>
+        </div>
       </TooltipTrigger>
       <TooltipContent>
         <div className="max-w-xs">
           <p className="font-semibold">{game.title}</p>
           {isDelayed && (
             <div className="flex flex-col gap-0.5 mt-1">
-              <Badge variant="destructive" className="w-fit text-xs h-4">
+              <Badge variant="destructive" className="w-fit text-[10px] h-4">
                 Delayed
               </Badge>
               {game.originalReleaseDate && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-[10px] text-muted-foreground">
                   Was originally scheduled for:{" "}
-                  {new Date(game.originalReleaseDate).toLocaleDateString(undefined, {
+                  {new Date(game.originalReleaseDate).toLocaleDateString("en-US", {
                     month: "long",
                     day: "numeric",
                     year: "numeric",

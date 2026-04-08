@@ -1,16 +1,14 @@
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { Plus, Moon, Sun, HardDrive, AlertCircle, Gamepad2, Loader2 } from "lucide-react";
+import { Plus, Moon, Sun, HardDrive, AlertCircle } from "lucide-react";
 import AddGameModal from "./AddGameModal";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NotificationCenter } from "./NotificationCenter";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Link } from "wouter";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
 import type { Config } from "@shared/schema";
 
 interface HeaderProps {
@@ -35,7 +33,6 @@ function formatBytes(bytes: number): string {
 export default function Header({ title = "Dashboard" }: HeaderProps) {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
-  const { toast } = useToast();
 
   // Fetch storage info every 5 minutes
   const {
@@ -45,34 +42,6 @@ export default function Header({ title = "Dashboard" }: HeaderProps) {
   } = useQuery<StorageInfo[]>({
     queryKey: ["/api/downloaders/storage"],
     refetchInterval: 5 * 60 * 1000,
-  });
-
-  // Fetch user to check for Steam ID
-  const { data: user } = useQuery<{ id: string; username: string; steamId64?: string }>({
-    queryKey: ["/api/auth/me"],
-  });
-
-  const steamSyncMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/steam/wishlist/sync");
-      return (await res.json()) as { success: boolean; addedCount?: number; message?: string };
-    },
-    onSuccess: (data) => {
-      toast({
-        title: "Steam Sync",
-        description:
-          data.addedCount != null
-            ? `Synced ${data.addedCount} game(s) from your Steam Wishlist.`
-            : data.message || "Sync completed successfully",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Sync Failed",
-        description: error.message || "Failed to connect to server",
-        variant: "destructive",
-      });
-    },
   });
 
   // Fetch config to check for IGDB status
@@ -110,13 +79,13 @@ export default function Header({ title = "Dashboard" }: HeaderProps) {
           {/* Storage Info */}
           <div className="flex items-center gap-2 sm:gap-3">
             {isLoading && (
-              <span className="text-xs text-muted-foreground animate-pulse">
+              <span className="text-[10px] sm:text-xs text-muted-foreground animate-pulse">
                 Checking storage...
               </span>
             )}
-            {isError && <span className="text-xs text-destructive">Error</span>}
+            {isError && <span className="text-[10px] sm:text-xs text-destructive">Error</span>}
             {!isLoading && !isError && storageInfo.length === 0 && (
-              <span className="text-xs text-muted-foreground opacity-50 hidden sm:inline">
+              <span className="text-[10px] sm:text-xs text-muted-foreground opacity-50 hidden sm:inline">
                 No downloaders
               </span>
             )}
@@ -126,13 +95,10 @@ export default function Header({ title = "Dashboard" }: HeaderProps) {
                 <Tooltip key={info.downloaderId}>
                   <TooltipTrigger asChild>
                     <div
-                      className="flex items-center gap-1 sm:gap-1.5 text-xs text-muted-foreground border rounded-full px-2 py-0.5 sm:px-2.5 sm:py-1 hover:bg-muted/50 transition-colors cursor-help"
+                      className="flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs text-muted-foreground border rounded-full px-2 py-0.5 sm:px-2.5 sm:py-1 hover:bg-muted/50 transition-colors cursor-help"
                       tabIndex={0}
                       role="button"
                       aria-label={`Storage for ${info.downloaderName}: ${formatBytes(info.freeSpace)} available`}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") e.currentTarget.click();
-                      }}
                     >
                       <HardDrive className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
                       <span className="font-medium">{formatBytes(info.freeSpace)}</span>
@@ -141,8 +107,10 @@ export default function Header({ title = "Dashboard" }: HeaderProps) {
                   <TooltipContent>
                     <div className="text-center">
                       <p className="font-semibold">{info.downloaderName}</p>
-                      <p className="text-xs text-muted-foreground">Free Disk Space</p>
-                      {info.error && <p className="text-destructive text-xs mt-1">{info.error}</p>}
+                      <p className="text-[10px] text-muted-foreground">Free Disk Space</p>
+                      {info.error && (
+                        <p className="text-destructive text-[10px] mt-1">{info.error}</p>
+                      )}
                     </div>
                   </TooltipContent>
                 </Tooltip>
@@ -156,23 +124,6 @@ export default function Header({ title = "Dashboard" }: HeaderProps) {
                 Add Game
               </Button>
             </AddGameModal>
-
-            {user?.steamId64 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="gap-2 hidden sm:flex"
-                disabled={steamSyncMutation.isPending}
-                onClick={() => steamSyncMutation.mutate()}
-              >
-                {steamSyncMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Gamepad2 className="w-4 h-4" />
-                )}
-                Sync Steam
-              </Button>
-            )}
 
             <NotificationCenter />
 

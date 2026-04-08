@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, clearSearchCache } from "@/lib/queryClient";
-import { refreshIndexerQueries } from "@/lib/indexers-cache";
+import { queryClient } from "@/lib/queryClient";
 import { asZodType, cn, compareEnabledPriorityName } from "@/lib/utils";
 import { Plus, Edit, Trash2, Check, X, Activity, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -76,8 +75,7 @@ export default function IndexersPage() {
       return response.json();
     },
     onSuccess: (data) => {
-      void refreshIndexerQueries(queryClient);
-      clearSearchCache();
+      queryClient.invalidateQueries({ queryKey: ["/api/indexers"] });
       setIsProwlarrDialogOpen(false);
       toast({
         title: "Sync successful",
@@ -109,8 +107,7 @@ export default function IndexersPage() {
       return response.json();
     },
     onSuccess: () => {
-      void refreshIndexerQueries(queryClient);
-      clearSearchCache();
+      queryClient.invalidateQueries({ queryKey: ["/api/indexers"] });
       setIsDialogOpen(false);
       setEditingIndexer(null);
       toast({ title: "Indexer added successfully" });
@@ -136,8 +133,7 @@ export default function IndexersPage() {
       return response.json();
     },
     onSuccess: () => {
-      void refreshIndexerQueries(queryClient);
-      clearSearchCache();
+      queryClient.invalidateQueries({ queryKey: ["/api/indexers"] });
       setIsDialogOpen(false);
       setEditingIndexer(null);
       toast({ title: "Indexer updated successfully" });
@@ -161,8 +157,7 @@ export default function IndexersPage() {
       if (!response.ok) throw new Error("Failed to delete indexer");
     },
     onSuccess: () => {
-      void refreshIndexerQueries(queryClient);
-      clearSearchCache();
+      queryClient.invalidateQueries({ queryKey: ["/api/indexers"] });
       toast({ title: "Indexer deleted successfully" });
     },
     onError: () => {
@@ -186,8 +181,7 @@ export default function IndexersPage() {
       return response.json();
     },
     onSuccess: () => {
-      void refreshIndexerQueries(queryClient);
-      clearSearchCache();
+      queryClient.invalidateQueries({ queryKey: ["/api/indexers"] });
     },
   });
 
@@ -344,7 +338,7 @@ export default function IndexersPage() {
 
   if (isLoading) {
     return (
-      <div className="p-6">
+      <div className="p-8">
         <div className="flex items-center space-x-2">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           <span>Loading indexers...</span>
@@ -354,11 +348,11 @@ export default function IndexersPage() {
   }
 
   return (
-    <div className="h-full overflow-auto p-6">
-      <div className="flex justify-between items-center mb-6">
+    <div className="h-full overflow-auto p-8">
+      <div className="flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Indexers</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">
+          <h1 className="text-3xl font-bold">Indexers</h1>
+          <p className="text-muted-foreground">
             Manage Torznab and Newznab indexers for game discovery
           </p>
         </div>
@@ -425,7 +419,6 @@ export default function IndexersPage() {
                       onClick={() => testConnectionMutation.mutate({ id: indexer.id })}
                       disabled={testingIndexerId === indexer.id}
                       title="Test connection"
-                      aria-label={`Test connection for ${indexer.name}`}
                       data-testid={`button-test-indexer-${indexer.id}`}
                     >
                       <Activity className="h-4 w-4" />
@@ -441,7 +434,6 @@ export default function IndexersPage() {
                       variant="outline"
                       size="icon"
                       onClick={() => handleEdit(indexer)}
-                      aria-label={`Edit ${indexer.name}`}
                       data-testid={`button-edit-indexer-${indexer.id}`}
                     >
                       <Edit className="h-4 w-4" />
@@ -450,7 +442,6 @@ export default function IndexersPage() {
                       variant="outline"
                       size="icon"
                       onClick={() => deleteMutation.mutate(indexer.id)}
-                      aria-label={`Delete ${indexer.name}`}
                       data-testid={`button-delete-indexer-${indexer.id}`}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -481,11 +472,6 @@ export default function IndexersPage() {
                 Jackett, Prowlarr, or direct Torznab-compatible trackers.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <Button onClick={handleAdd} data-testid="button-add-indexer-empty">
-                Add Indexer
-              </Button>
-            </CardContent>
           </Card>
         )}
       </div>

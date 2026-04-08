@@ -1,175 +1,20 @@
 import { storage } from "./storage.js";
-import { igdbClient, IGDB_EARLY_ACCESS_STATUS } from "./igdb.js";
+import { igdbClient } from "./igdb.js";
 import { igdbLogger } from "./logger.js";
 import { notifyUser } from "./socket.js";
 import { DownloaderManager } from "./downloaders.js";
-import { searchAllIndexers, filterBlacklistedReleases } from "./search.js";
+import { searchAllIndexers } from "./search.js";
 import { xrelClient, DEFAULT_XREL_BASE } from "./xrel.js";
-import { steamService } from "./steam.js";
-import { downloadRulesSchema, type Game, type InsertNotification } from "../shared/schema.js";
+
+import { downloadRulesSchema } from "../shared/schema.js";
 import { categorizeDownload } from "../shared/download-categorizer.js";
-import {
-  releaseMatchesGame,
-  normalizeTitle,
-  cleanReleaseName,
-  parseJsonStringArray,
-} from "../shared/title-utils.js";
+import { releaseMatchesGame } from "../shared/title-utils.js";
 
 const DELAY_THRESHOLD_DAYS = 7;
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const DOWNLOAD_CHECK_INTERVAL_MS = 60 * 1000; // 1 minute
 const AUTO_SEARCH_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const XREL_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours (xREL search rate limit: 2/5s)
-const OWNED_STATUSES = new Set(["owned", "completed", "downloading"]);
-
-type DownloadSortBy = "seeders" | "date" | "size";
-
-interface AutoSearchRules {
-  minSeeders: number;
-  sortBy: DownloadSortBy;
-  visibleCategoriesSet: Set<string>;
-}
-
-interface AutoSearchCategorizedItems {
-  mainItems: Awaited<ReturnType<typeof searchAllIndexers>>["items"];
-  updateItems: Awaited<ReturnType<typeof searchAllIndexers>>["items"];
-}
-
-function getAutoSearchRules(downloadRules: string | null): AutoSearchRules {
-  let minSeeders = 0;
-  let sortBy: DownloadSortBy = "seeders";
-  let visibleCategoriesSet = new Set(["main", "update", "dlc", "extra"]);
-
-  if (downloadRules) {
-    const parsed = JSON.parse(downloadRules);
-    const rules = downloadRulesSchema.parse(parsed);
-    minSeeders = rules.minSeeders;
-    sortBy = rules.sortBy;
-    visibleCategoriesSet = new Set(rules.visibleCategories);
-  }
-
-  return { minSeeders, sortBy, visibleCategoriesSet };
-}
-
-function categorizeSearchItems(
-  items: Awaited<ReturnType<typeof searchAllIndexers>>["items"],
-  rules: AutoSearchRules
-): AutoSearchCategorizedItems {
-  const sortedItems = items
-    .filter((item) => {
-      const seeders = item.seeders ?? 0;
-      return seeders >= rules.minSeeders;
-    })
-    .sort((a, b) => {
-      if (rules.sortBy === "seeders") {
-        return (b.seeders ?? 0) - (a.seeders ?? 0);
-      }
-      if (rules.sortBy === "date") {
-        return new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime();
-      }
-      return (b.size ?? 0) - (a.size ?? 0);
-    });
-
-  return sortedItems.reduce<AutoSearchCategorizedItems>(
-    (acc, item) => {
-      const { category } = categorizeDownload(item.title);
-
-      if (!rules.visibleCategoriesSet.has(category)) {
-        return acc;
-      }
-
-      if (category === "main") {
-        acc.mainItems.push(item);
-      } else if (category === "update") {
-        acc.updateItems.push(item);
-      }
-
-      return acc;
-    },
-    { mainItems: [], updateItems: [] }
-  );
-}
-
-function applyPreferredGroupsFilter(
-  items: Awaited<ReturnType<typeof searchAllIndexers>>["items"],
-  preferredGroups: string[]
-): Awaited<ReturnType<typeof searchAllIndexers>>["items"] {
-  if (preferredGroups.length === 0) return items;
-  const filtered = items.filter(
-    (item) =>
-      item.group && preferredGroups.some((g) => g.toLowerCase() === item.group!.toLowerCase())
-  );
-  return filtered.length > 0 ? filtered : items;
-}
-
-async function searchAndCategorizeItemsForGame(
-  game: Pick<Game, "id" | "title">,
-  downloadRules: string | null
-): Promise<AutoSearchCategorizedItems | null> {
-  const { items, errors } = await searchAllIndexers({
-    query: game.title,
-    limit: 10,
-  });
-
-  if (errors.length > 0) {
-    const networkKeywords = [
-      "fetch failed",
-      "Unsafe URL detected",
-      "ENOTFOUND",
-      "EAI_AGAIN",
-      "ETIMEDOUT",
-      "network timeout",
-    ];
-
-    const areAllErrorsNetworkRelated = errors.every((err) =>
-      networkKeywords.some((keyword) => err.includes(keyword))
-    );
-
-    if (areAllErrorsNetworkRelated) {
-      igdbLogger.warn(
-        { gameTitle: game.title, errorCount: errors.length },
-        "Search failed due to network connectivity issues (DNS/Fetch/Safety check). Please check your internet connection."
-      );
-    } else {
-      igdbLogger.warn({ gameTitle: game.title, errors }, "Errors during search");
-    }
-  }
-
-  if (items.length === 0) {
-    return null;
-  }
-
-  const matchedItems = items.filter((item) => releaseMatchesGame(item.title, game.title));
-  if (matchedItems.length === 0) {
-    igdbLogger.debug(
-      { gameTitle: game.title, originalCount: items.length },
-      "No items passed strict title matching"
-    );
-    return null;
-  }
-
-  // Filter out blacklisted releases
-  const blacklisted = await storage.getReleaseBlacklistSet(game.id);
-  const nonBlacklisted = filterBlacklistedReleases(matchedItems, blacklisted);
-
-  if (nonBlacklisted.length === 0) {
-    igdbLogger.debug(
-      { gameTitle: game.title, matchedCount: matchedItems.length },
-      "All matched items were blacklisted"
-    );
-    return null;
-  }
-
-  let rules: AutoSearchRules;
-  try {
-    rules = getAutoSearchRules(downloadRules);
-  } catch (error) {
-    igdbLogger.warn({ gameTitle: game.title, error }, "Failed to parse download rules");
-    rules = getAutoSearchRules(null);
-  }
-
-  return categorizeSearchItems(nonBlacklisted, rules);
-}
 
 export function startCronJobs() {
   igdbLogger.info("Starting cron jobs...");
@@ -209,13 +54,13 @@ export function startCronJobs() {
   }, XREL_CHECK_INTERVAL_MS);
 }
 
-export async function checkGameUpdates() {
+async function checkGameUpdates() {
   igdbLogger.info("Checking for game updates...");
 
   const allGames = await storage.getAllGames();
 
-  // Filter games that are tracked (have IGDB ID) and not hidden
-  const gamesToCheck = allGames.filter((g) => g.igdbId !== null && !g.hidden);
+  // Filter games that are tracked (have IGDB ID)
+  const gamesToCheck = allGames.filter((g) => g.igdbId !== null);
 
   if (gamesToCheck.length === 0) {
     igdbLogger.info("No games to check for updates.");
@@ -248,27 +93,12 @@ export async function checkGameUpdates() {
 
   const igdbGameMap = new Map(igdbGames.map((g) => [g.id, g]));
 
-  const updatesMap = new Map<string, Partial<Game>>();
-  const notificationsToSend: InsertNotification[] = [];
+  let updatedCount = 0;
 
   for (const game of gamesToCheck) {
     const igdbGame = igdbGameMap.get(game.igdbId!);
 
-    if (!igdbGame) continue;
-
-    // Helper to queue update
-    const queueUpdate = (updates: Partial<Game>) => {
-      const existing = updatesMap.get(game.id) || {};
-      updatesMap.set(game.id, { ...existing, ...updates });
-    };
-
-    // Update early access flag regardless of whether a release date is known
-    const newEarlyAccess = igdbGame.status === IGDB_EARLY_ACCESS_STATUS;
-    if (game.earlyAccess !== newEarlyAccess) {
-      queueUpdate({ earlyAccess: newEarlyAccess });
-    }
-
-    if (!igdbGame.first_release_date) continue;
+    if (!igdbGame || !igdbGame.first_release_date) continue;
 
     const currentReleaseDate = new Date(igdbGame.first_release_date * 1000);
     const currentReleaseDateStr = currentReleaseDate.toISOString().split("T")[0];
@@ -276,10 +106,10 @@ export async function checkGameUpdates() {
     // Initialize originalReleaseDate if not set
     if (!game.originalReleaseDate) {
       if (game.releaseDate) {
-        queueUpdate({ originalReleaseDate: game.releaseDate });
+        await storage.updateGame(game.id, { originalReleaseDate: game.releaseDate });
         game.originalReleaseDate = game.releaseDate;
       } else {
-        queueUpdate({
+        await storage.updateGame(game.id, {
           releaseDate: currentReleaseDateStr,
           originalReleaseDate: currentReleaseDateStr,
         });
@@ -306,15 +136,16 @@ export async function checkGameUpdates() {
     // Check if released status changed to released
     if (newReleaseStatus === "released" && game.releaseStatus !== "released") {
       const message = `${game.title} is now available!`;
-      notificationsToSend.push({
+      const notification = await storage.addNotification({
         type: "success",
         title: "Game Released",
         message,
         link: "/library",
       });
+      notifyUser("notification", notification);
     }
 
-    // If release date or status changed, update DB
+    // If things changed, update DB
     if (game.releaseDate !== currentReleaseDateStr || game.releaseStatus !== newReleaseStatus) {
       igdbLogger.info(
         {
@@ -328,44 +159,28 @@ export async function checkGameUpdates() {
         "Game release updated"
       );
 
-      queueUpdate({
+      await storage.updateGame(game.id, {
         releaseDate: currentReleaseDateStr,
         releaseStatus: newReleaseStatus,
       });
+      updatedCount++;
 
       // Send notification if game is delayed
       if (newReleaseStatus === "delayed" && game.releaseStatus !== "delayed") {
         const message = `${game.title} has been delayed to ${currentReleaseDateStr}`;
-        notificationsToSend.push({
+        const notification = await storage.addNotification({
           type: "delayed",
           title: "Game Delayed",
           message,
           link: "/wishlist",
         });
-      }
-    }
-  }
-
-  // Apply batch updates
-  if (updatesMap.size > 0) {
-    const batchUpdates = Array.from(updatesMap.entries()).map(([id, data]) => ({ id, data }));
-    await storage.updateGamesBatch(batchUpdates);
-  }
-
-  // Send notifications in batch
-  if (notificationsToSend.length > 0) {
-    try {
-      const addedNotifications = await storage.addNotificationsBatch(notificationsToSend);
-      for (const notification of addedNotifications) {
         notifyUser("notification", notification);
       }
-    } catch (error) {
-      igdbLogger.error({ error }, "Failed to add notifications in batch");
     }
   }
 
   igdbLogger.info(
-    { updatedCount: updatesMap.size, checkedCount: gamesToCheck.length },
+    { updatedCount, checkedCount: gamesToCheck.length },
     "Finished checking for game updates."
   );
 }
@@ -560,7 +375,7 @@ async function checkDownloadStatus() {
   }
 }
 
-export async function checkAutoSearch() {
+async function checkAutoSearch() {
   igdbLogger.debug("Checking auto-search for wanted games...");
 
   try {
@@ -589,11 +404,9 @@ export async function checkAutoSearch() {
 
         // Games are already filtered for wanted and not hidden by the storage query
         const wantedGames = userGames;
-        const OWNED_STATUSES_ARRAY = Array.from(OWNED_STATUSES);
-        const ownedGames = await storage.getUserGames(userId, false, OWNED_STATUSES_ARRAY);
 
-        if (wantedGames.length === 0 && ownedGames.length === 0) {
-          igdbLogger.debug({ userId }, "No wanted or owned games found");
+        if (wantedGames.length === 0) {
+          igdbLogger.debug({ userId }, "No wanted games found");
           // Update last search time even if no games found, to avoid checking again too soon
           await storage.updateUserSettings(userId, { lastAutoSearch: new Date() });
           continue;
@@ -606,31 +419,117 @@ export async function checkAutoSearch() {
 
         let gamesWithResults = 0;
 
-        const preferredGroups = parseJsonStringArray(settings.preferredReleaseGroups);
-
         for (const game of wantedGames) {
           try {
-            // Skip unreleased games if configured to do so
-            if (!settings.autoSearchUnreleased && game.releaseStatus !== "released") {
-              igdbLogger.debug(
-                { gameTitle: game.title, status: game.releaseStatus },
-                "Skipping auto-search for unreleased game"
+            // Search for the game across all indexers
+            const { items, errors } = await searchAllIndexers({
+              query: game.title,
+              limit: 10,
+            });
+
+            if (errors.length > 0) {
+              const networkKeywords = [
+                "fetch failed",
+                "Unsafe URL detected",
+                "ENOTFOUND",
+                "EAI_AGAIN",
+                "ETIMEDOUT",
+                "network timeout",
+              ];
+
+              const areAllErrorsNetworkRelated = errors.every((err) =>
+                networkKeywords.some((keyword) => err.includes(keyword))
               );
+
+              if (areAllErrorsNetworkRelated) {
+                igdbLogger.warn(
+                  { gameTitle: game.title, errorCount: errors.length },
+                  "Search failed due to network connectivity issues (DNS/Fetch/Safety check). Please check your internet connection."
+                );
+              } else {
+                igdbLogger.warn({ gameTitle: game.title, errors }, "Errors during search");
+              }
+            }
+
+            if (items.length === 0) {
               continue;
             }
 
-            const searchResult = await searchAndCategorizeItemsForGame(
-              game,
-              settings.downloadRules
-            );
-            if (!searchResult) {
+            // Double-check matches locally to ensure they actually match the game title
+            const matchedItems = items.filter((item) => releaseMatchesGame(item.title, game.title));
+
+            if (matchedItems.length === 0) {
+              igdbLogger.debug(
+                { gameTitle: game.title, originalCount: items.length },
+                "No items passed strict title matching"
+              );
               continue;
             }
 
             gamesWithResults++;
 
-            // Filter by preferred release groups if configured
-            const mainItems = applyPreferredGroupsFilter(searchResult.mainItems, preferredGroups);
+            // Load download rules from settings
+            let minSeeders = 0;
+            let sortBy: "seeders" | "date" | "size" = "seeders";
+            let visibleCategoriesSet = new Set(["main", "update", "dlc", "extra"]);
+
+            if (settings.downloadRules) {
+              try {
+                const parsed = JSON.parse(settings.downloadRules);
+                const rules = downloadRulesSchema.parse(parsed);
+                minSeeders = rules.minSeeders;
+                sortBy = rules.sortBy;
+                visibleCategoriesSet = new Set(rules.visibleCategories);
+              } catch (error) {
+                igdbLogger.warn({ gameTitle: game.title, error }, "Failed to parse download rules");
+              }
+            }
+
+            // Filter items by seeders
+            let filteredItems = matchedItems.filter((item) => {
+              const seeders = item.seeders ?? 0;
+              return seeders >= minSeeders;
+            });
+
+            // Sort items according to rules
+            filteredItems = filteredItems.sort((a, b) => {
+              if (sortBy === "seeders") {
+                return (b.seeders ?? 0) - (a.seeders ?? 0);
+              } else if (sortBy === "date") {
+                return new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime();
+              } else {
+                // size
+                return (b.size ?? 0) - (a.size ?? 0);
+              }
+            });
+
+            // Filter and categorize items based on visible categories
+            const categorizedItems = filteredItems
+              .map((item) => {
+                const { category } = categorizeDownload(item.title);
+                return { item, category };
+              })
+              .filter(({ category }) => visibleCategoriesSet.has(category));
+
+            const mainItems = categorizedItems
+              .filter(({ category }) => category === "main")
+              .map(({ item }) => item);
+
+            const updateItems = categorizedItems
+              .filter(({ category }) => category === "update")
+              .map(({ item }) => item);
+
+            // Notify about updates if setting enabled
+            if (updateItems.length > 0 && settings.notifyUpdates) {
+              const notification = await storage.addNotification({
+                userId,
+                type: "info",
+                title: "Game Updates Available",
+                message: `${updateItems.length} update(s) found for ${game.title}`,
+                link: `modal:game:${game.id}`,
+              });
+              notifyUser("notification", notification);
+            }
 
             // Handle main items
             if (mainItems.length === 0) {
@@ -666,12 +565,11 @@ export async function checkAutoSearch() {
                       await storage.updateGameStatus(game.id, { status: "downloading" });
 
                       // Notify success
-                      const groupSuffix = item.group ? ` [${item.group}]` : "";
                       const notification = await storage.addNotification({
                         userId,
                         type: "success",
                         title: "Download Started",
-                        message: `Started downloading ${game.title}${groupSuffix} via ${item.downloadType === "usenet" ? "Usenet" : "Torrent"}`,
+                        message: `Started downloading ${game.title} via ${item.downloadType === "usenet" ? "Usenet" : "Torrent"}`,
                         link: "/library",
                       });
                       notifyUser("notification", notification);
@@ -695,7 +593,6 @@ export async function checkAutoSearch() {
                   link: `modal:game:${game.id}`,
                 });
                 notifyUser("notification", notification);
-                await storage.updateGameSearchResultsAvailable(game.id, true);
               }
             } else if (mainItems.length > 1 && settings.notifyMultipleDownloads) {
               // Multiple results found, notify user to choose
@@ -707,49 +604,9 @@ export async function checkAutoSearch() {
                 link: `modal:game:${game.id}`,
               });
               notifyUser("notification", notification);
-              await storage.updateGameSearchResultsAvailable(game.id, true);
             }
           } catch (error) {
             igdbLogger.error({ gameTitle: game.title, error }, "Error searching for game");
-          }
-        }
-
-        // Search owned games for update packs only.
-        for (const game of ownedGames) {
-          try {
-            // Skip unreleased games if configured to do so
-            if (!settings.autoSearchUnreleased && game.releaseStatus !== "released") {
-              continue;
-            }
-
-            const searchResult = await searchAndCategorizeItemsForGame(
-              game,
-              settings.downloadRules
-            );
-            if (!searchResult) {
-              continue;
-            }
-
-            const updateItems = applyPreferredGroupsFilter(
-              searchResult.updateItems,
-              preferredGroups
-            );
-
-            if (updateItems.length > 0 && settings.notifyUpdates) {
-              const notification = await storage.addNotification({
-                userId,
-                type: "info",
-                title: "Game Updates Available",
-                message: `${updateItems.length} update(s) found for ${game.title}`,
-                link: `modal:game:${game.id}`,
-              });
-              notifyUser("notification", notification);
-            }
-          } catch (error) {
-            igdbLogger.error(
-              { gameTitle: game.title, error },
-              "Error searching for owned game updates"
-            );
           }
         }
 
@@ -769,7 +626,7 @@ export async function checkAutoSearch() {
   }
 }
 
-export async function checkXrelReleases() {
+async function checkXrelReleases() {
   igdbLogger.debug("Checking xREL.to for wanted games...");
 
   try {
@@ -789,30 +646,8 @@ export async function checkXrelReleases() {
       return;
     }
 
-    // ⚡ Bolt: Pre-process releases once to avoid redundant normalization in the nested loop
-    const processedReleases = latestReleases.map((rel) => {
-      const extTitleNorm = rel.ext_info?.title ? normalizeTitle(rel.ext_info.title) : null;
-      const dirCleaned = cleanReleaseName(rel.dirname);
-      const dirNorm = normalizeTitle(dirCleaned);
-      const extRegex =
-        extTitleNorm && extTitleNorm.length >= 5
-          ? new RegExp(`\\b${extTitleNorm.replace(/[.*+?^${}()|[\\]/g, "\\$&")}\\b`, "i")
-          : null;
-      return {
-        rel,
-        extTitleNorm,
-        dirNorm,
-        dirLower: rel.dirname.toLowerCase().replace(/[._-]/g, " "),
-        extRegex,
-      };
-    });
     const allGames = await storage.getAllGames();
-    const wantedGames = allGames
-      .filter((g) => g.userId && g.status === "wanted" && !g.hidden)
-      .map((g) => ({
-        game: g,
-        normalized: normalizeTitle(g.title),
-      }));
+    const wantedGames = allGames.filter((g) => g.userId && g.status === "wanted" && !g.hidden);
 
     if (wantedGames.length === 0) {
       return;
@@ -821,7 +656,7 @@ export async function checkXrelReleases() {
     // Cache user settings to avoid redundant DB hits
     const userSettingsCache = new Map();
 
-    for (const { game, normalized } of wantedGames) {
+    for (const game of wantedGames) {
       try {
         const userId = game.userId!;
         if (!userSettingsCache.has(userId)) {
@@ -833,22 +668,19 @@ export async function checkXrelReleases() {
         const p2p = settings?.xrelP2pReleases === true;
 
         // Filter releases for this game based on user preferences and title match
-        const matchingReleases = processedReleases.filter((pr) => {
-          if (pr.rel.source === "scene" && !scene) return false;
-          if (pr.rel.source === "p2p" && !p2p) return false;
+        const matchingReleases = latestReleases.filter((rel) => {
+          if (rel.source === "scene" && !scene) return false;
+          if (rel.source === "p2p" && !p2p) return false;
 
-          // 1. Pre-processed normalized match
-          if (pr.extTitleNorm === normalized || pr.dirNorm === normalized) return true;
-
-          // 2. Fallback to shared matching logic for fuzzy/word-based (still benefits from less cleaning)
-          if (releaseMatchesGame(pr.rel.dirname, game.title)) return true;
-          if (pr.rel.ext_info?.title && releaseMatchesGame(pr.rel.ext_info.title, game.title))
+          // Use shared matching logic (handles cleaning, fuzzy match, and smart word fallback)
+          if (releaseMatchesGame(rel.dirname, game.title)) return true;
+          if (rel.ext_info?.title && releaseMatchesGame(rel.ext_info.title, game.title))
             return true;
 
           return false;
         });
 
-        for (const { rel } of matchingReleases) {
+        for (const rel of matchingReleases) {
           const already = await storage.hasXrelNotifiedRelease(game.id, rel.id);
           if (already) continue;
 
@@ -877,185 +709,5 @@ export async function checkXrelReleases() {
     }
   } catch (error) {
     igdbLogger.error({ error }, "Error in checkXrelReleases");
-  }
-}
-
-export async function checkSteamWishlist() {
-  igdbLogger.info("Starting Steam Wishlist check for all users...");
-  const users = await storage.getAllUsers();
-  for (const user of users) {
-    if (user.steamId64) {
-      await syncUserSteamWishlist(user.id);
-    }
-  }
-}
-
-const MAX_STEAM_SYNC_FAILURES = 3;
-
-interface SteamSyncGameSet {
-  currentGames: Game[];
-  ownedIgdbIds: Set<number>;
-  ownedSteamAppIds: Set<number>;
-}
-
-/** Link existing games that match by IGDB ID but are missing their Steam App ID. */
-async function linkExistingGamesToSteam(
-  pendingSteamAppIds: number[],
-  steamToIgdbMap: Map<number, number>,
-  { currentGames, ownedIgdbIds }: SteamSyncGameSet
-): Promise<Set<number>> {
-  const newIgdbIdsToFetch = new Set<number>();
-  const currentGamesByIgdbId = new Map(
-    currentGames.filter((g) => g.igdbId != null).map((g) => [g.igdbId as number, g])
-  );
-
-  for (const steamAppId of pendingSteamAppIds) {
-    const igdbId = steamToIgdbMap.get(steamAppId);
-    if (igdbId == null) {
-      igdbLogger.debug({ steamAppId }, "No IGDB ID found for Steam App ID");
-      continue;
-    }
-
-    if (ownedIgdbIds.has(igdbId)) {
-      const existing = currentGamesByIgdbId.get(igdbId);
-      if (existing && !existing.steamAppId) {
-        await storage.updateGame(existing.id, { steamAppId });
-      }
-    } else {
-      newIgdbIdsToFetch.add(igdbId);
-    }
-  }
-
-  return newIgdbIdsToFetch;
-}
-
-/** Fetch details from IGDB and add new games to the user's library. */
-async function addNewSteamWishlistGames(
-  userId: string,
-  pendingSteamAppIds: number[],
-  steamToIgdbMap: Map<number, number>,
-  newIgdbIds: Set<number>,
-  ownedIgdbIds: Set<number>
-) {
-  const addedGames: { title: string; igdbId: number; steamAppId: number }[] = [];
-
-  const gameDetailsList = await igdbClient.getGamesByIds(Array.from(newIgdbIds));
-  const gameDetailsMap = new Map(gameDetailsList.map((g) => [g.id, g]));
-
-  for (const steamAppId of pendingSteamAppIds) {
-    const igdbId = steamToIgdbMap.get(steamAppId);
-    if (igdbId == null || ownedIgdbIds.has(igdbId)) continue;
-
-    const gameDetails = gameDetailsMap.get(igdbId);
-    if (!gameDetails) continue;
-
-    const formatted = igdbClient.formatGameData(gameDetails);
-    await storage.addGame({
-      userId,
-      title: formatted.title as string,
-      igdbId: formatted.igdbId as number,
-      steamAppId: steamAppId,
-      status: "wanted",
-      coverUrl: formatted.coverUrl as string,
-      summary: formatted.summary as string,
-      releaseDate: formatted.releaseDate as string,
-      rating: formatted.rating as number | null,
-      platforms: formatted.platforms as string[],
-      genres: formatted.genres as string[],
-      developers: formatted.developers as string[],
-      publishers: formatted.publishers as string[],
-      screenshots: formatted.screenshots as string[],
-      source: "steam",
-      hidden: false,
-    });
-    addedGames.push({
-      title: formatted.title as string,
-      igdbId: formatted.igdbId as number,
-      steamAppId,
-    });
-  }
-
-  return addedGames;
-}
-
-export async function syncUserSteamWishlist(userId: string) {
-  let steamSyncFailures = 0;
-
-  try {
-    const user = await storage.getUser(userId);
-    if (!user || !user.steamId64) return;
-
-    const settings = await storage.getUserSettings(userId);
-    steamSyncFailures = settings?.steamSyncFailures ?? 0;
-
-    if (steamSyncFailures >= MAX_STEAM_SYNC_FAILURES) {
-      const message =
-        "Steam wishlist sync is temporarily disabled after repeated failures. " +
-        "Please verify Steam profile visibility and try again later.";
-      igdbLogger.warn({ userId, steamSyncFailures }, message);
-      return { success: false, message };
-    }
-
-    igdbLogger.info({ userId, steamId: user.steamId64 }, "Syncing Steam Wishlist");
-
-    const wishlistGames = await steamService.getWishlist(user.steamId64);
-
-    if (steamSyncFailures > 0) {
-      await storage.updateUserSettings(userId, { steamSyncFailures: 0 });
-    }
-
-    const currentGames = await storage.getUserGames(userId, true);
-    const gameSet: SteamSyncGameSet = {
-      currentGames,
-      ownedIgdbIds: new Set(
-        currentGames.filter((g) => g.igdbId != null).map((g) => g.igdbId as number)
-      ),
-      ownedSteamAppIds: new Set(
-        currentGames.filter((g) => g.steamAppId != null).map((g) => g.steamAppId as number)
-      ),
-    };
-
-    const pendingSteamAppIds = wishlistGames
-      .filter((sg) => !gameSet.ownedSteamAppIds.has(sg.steamAppId))
-      .map((sg) => sg.steamAppId);
-
-    let addedGames: { title: string; igdbId: number; steamAppId: number }[] = [];
-
-    if (pendingSteamAppIds.length > 0) {
-      const steamToIgdbMap = await igdbClient.getGameIdsBySteamAppIds(pendingSteamAppIds);
-      const newIgdbIds = await linkExistingGamesToSteam(
-        pendingSteamAppIds,
-        steamToIgdbMap,
-        gameSet
-      );
-
-      if (newIgdbIds.size > 0) {
-        addedGames = await addNewSteamWishlistGames(
-          userId,
-          pendingSteamAppIds,
-          steamToIgdbMap,
-          newIgdbIds,
-          gameSet.ownedIgdbIds
-        );
-      }
-    }
-
-    if (addedGames.length > 0) {
-      const notification = await storage.addNotification({
-        userId,
-        type: "success",
-        title: "Steam Wishlist Synced",
-        message: `Successfully added ${addedGames.length} games from your Steam Wishlist.`,
-      });
-      notifyUser("notification", notification);
-    }
-
-    return { success: true, addedCount: addedGames.length, games: addedGames };
-  } catch (error) {
-    const nextSteamSyncFailures = steamSyncFailures + 1;
-    await storage.updateUserSettings(userId, { steamSyncFailures: nextSteamSyncFailures });
-    igdbLogger.error({ userId, error }, "Steam Sync Failed");
-    const errMessage = error instanceof Error ? error.message : "Unknown error";
-    return { success: false, message: errMessage };
   }
 }

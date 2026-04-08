@@ -295,7 +295,7 @@ export default function DownloadersPage() {
 
   if (isLoading) {
     return (
-      <div className="p-6">
+      <div className="p-8">
         <div className="flex items-center space-x-2">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           <span>Loading downloaders...</span>
@@ -305,11 +305,11 @@ export default function DownloadersPage() {
   }
 
   return (
-    <div className="h-full overflow-auto p-6">
-      <div className="flex justify-between items-center mb-6">
+    <div className="h-full overflow-auto p-8">
+      <div className="flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Downloaders</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">
+          <h1 className="text-3xl font-bold">Downloaders</h1>
+          <p className="text-muted-foreground">
             Manage download clients for automated downloads. Downloads are sent to enabled clients
             in priority order (lowest number first), with automatic fallback if a client fails.
           </p>
@@ -369,7 +369,6 @@ export default function DownloadersPage() {
                       onClick={() => testConnectionMutation.mutate({ id: downloader.id })}
                       disabled={testingDownloaderId === downloader.id}
                       title="Test connection"
-                      aria-label={`Test connection for ${downloader.name}`}
                       data-testid={`button-test-downloader-${downloader.id}`}
                     >
                       <Activity className="h-4 w-4" />
@@ -385,7 +384,6 @@ export default function DownloadersPage() {
                       variant="outline"
                       size="icon"
                       onClick={() => handleEdit(downloader)}
-                      aria-label={`Edit ${downloader.name}`}
                       data-testid={`button-edit-downloader-${downloader.id}`}
                     >
                       <Edit className="h-4 w-4" />
@@ -394,7 +392,6 @@ export default function DownloadersPage() {
                       variant="outline"
                       size="icon"
                       onClick={() => deleteMutation.mutate(downloader.id)}
-                      aria-label={`Delete ${downloader.name}`}
                       data-testid={`button-delete-downloader-${downloader.id}`}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -407,7 +404,7 @@ export default function DownloadersPage() {
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-2">
-                  {!isUsenetDownloader(downloader.type) && downloader.downloadPath && (
+                  {downloader.downloadPath && (
                     <Badge variant="outline">Path: {downloader.downloadPath}</Badge>
                   )}
                   {downloader.category && (
@@ -427,11 +424,6 @@ export default function DownloadersPage() {
                 include Transmission, rTorrent, qBittorrent, SABnzbd, and NZBGet.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <Button onClick={handleAdd} data-testid="button-add-downloader-empty">
-                Add Downloader
-              </Button>
-            </CardContent>
           </Card>
         )}
       </div>
@@ -662,26 +654,24 @@ export default function DownloadersPage() {
                     </FormItem>
                   )}
                 />
-                {!isUsenetDownloader(form.watch("type")) && (
-                  <FormField
-                    control={form.control}
-                    name="downloadPath"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Download Path (Optional)</FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder="/home/downloads/games"
-                            {...field}
-                            value={field.value || ""}
-                            data-testid="input-downloader-path"
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                )}
+                <FormField
+                  control={form.control}
+                  name="downloadPath"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Download Path (Optional)</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="/home/downloads/games"
+                          {...field}
+                          value={field.value || ""}
+                          data-testid="input-downloader-path"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 <FormField
                   control={form.control}
                   name="category"
@@ -702,7 +692,7 @@ export default function DownloadersPage() {
                           : form.watch("type") === "transmission"
                             ? "Creates a subdirectory in the output directory. Label for downloads in downloader"
                             : form.watch("type") === "sabnzbd" || form.watch("type") === "nzbget"
-                              ? "Category for NZBs in downloader (path is managed by category settings)"
+                              ? "Category for NZBs in downloader"
                               : "Label for downloads in downloader"}
                       </FormDescription>
                       <FormMessage />

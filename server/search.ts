@@ -18,11 +18,8 @@ export interface SearchItem {
   // Protocol-specific fields
   seeders?: number;
   leechers?: number;
-  downloadVolumeFactor?: number;
-  uploadVolumeFactor?: number;
   grabs?: number;
   age?: number;
-  files?: number;
   poster?: string;
   group?: string;
   comments?: string;
@@ -68,15 +65,6 @@ export async function searchAllIndexers(
       torznabClient
         .searchMultipleIndexers(torznabIndexers, searchParams)
         .then((res) => ({ type: "torznab" as const, ...res }))
-        .catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : String(err);
-          searchLogger.error({ error: message }, "torznab client failed");
-          return {
-            type: "torznab" as const,
-            results: { items: [], total: 0, offset: 0 },
-            errors: [message],
-          };
-        })
     );
   }
 
@@ -85,15 +73,6 @@ export async function searchAllIndexers(
       newznabClient
         .searchMultipleIndexers(newznabIndexers, searchParams)
         .then((res) => ({ type: "newznab" as const, ...res }))
-        .catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : String(err);
-          searchLogger.error({ error: message }, "newznab client failed");
-          return {
-            type: "newznab" as const,
-            results: { items: [], total: 0, offset: 0 },
-            errors: [{ indexer: "newznab", error: message }],
-          };
-        })
     );
   }
 
@@ -139,8 +118,6 @@ export async function searchAllIndexers(
           downloadType: "torrent" as const,
           seeders: item.seeders,
           leechers: item.leechers,
-          downloadVolumeFactor: item.downloadVolumeFactor,
-          uploadVolumeFactor: item.uploadVolumeFactor,
           group: parseReleaseMetadata(item.title).group,
           comments,
         } as SearchItem;
@@ -163,7 +140,6 @@ export async function searchAllIndexers(
             downloadType: "usenet" as const,
             grabs: item.grabs,
             age: item.age,
-            files: item.files,
             poster: item.poster,
             group: item.group,
           }) as SearchItem
@@ -189,14 +165,4 @@ export async function searchAllIndexers(
     offset: options.offset || 0,
     errors: combinedErrors,
   };
-}
-
-/**
- * Filters search items by removing any whose title appears in the blacklist set.
- */
-export function filterBlacklistedReleases(
-  items: SearchItem[],
-  blacklisted: Set<string>
-): SearchItem[] {
-  return blacklisted.size > 0 ? items.filter((item) => !blacklisted.has(item.title)) : items;
 }

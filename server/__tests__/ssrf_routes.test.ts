@@ -91,10 +91,6 @@ vi.mock("../auth.js", () => ({
   },
 }));
 
-vi.mock("../steam-routes.js", () => ({
-  steamRoutes: (_req: unknown, _res: unknown, next: () => void) => next(),
-}));
-
 // Import registerRoutes AFTER mocking
 import { registerRoutes } from "../routes.js";
 
@@ -155,6 +151,14 @@ describe("SSRF Vulnerability in Routes", () => {
     });
 
     expect(response.status).toBe(400);
-    expect(response.body.error).toMatch(/Invalid or unsafe URL/);
+    // Express validator handles this
+    expect(response.body.error).toMatch(/Validation failed/);
+    expect(response.body.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          msg: "Invalid or unsafe URL"
+        })
+      ])
+    );
   });
 });

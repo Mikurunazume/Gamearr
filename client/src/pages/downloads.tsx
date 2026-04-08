@@ -32,7 +32,6 @@ import {
   Info,
   Download,
   Newspaper,
-  Tag,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -70,9 +69,6 @@ interface DownloadStatus {
   unpackStatus?: "unpacking" | "completed" | "failed";
   age?: number;
   grabs?: number;
-  // Questarr tracking fields
-  trackedByQuestarr?: boolean;
-  downloaderCategory?: string;
 }
 
 interface DownloaderError {
@@ -86,26 +82,6 @@ interface DownloadsResponse {
   errors: DownloaderError[];
 }
 
-const STATUS_ORDER: DownloadStatusType[] = [
-  "downloading",
-  "repairing",
-  "unpacking",
-  "seeding",
-  "completed",
-  "paused",
-  "error",
-];
-
-const STATUS_COLORS: Record<DownloadStatusType, string> = {
-  downloading: "text-blue-400",
-  seeding: "text-green-400",
-  completed: "text-green-600",
-  paused: "text-yellow-400",
-  error: "text-red-400",
-  repairing: "text-orange-400",
-  unpacking: "text-purple-400",
-};
-
 export default function Downloads() {
   const { toast } = useToast();
   const [hasShownErrors, setHasShownErrors] = useState<Set<string>>(new Set());
@@ -113,7 +89,6 @@ export default function Downloads() {
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<DownloadStatusType | "all">("all");
   const [typeFilter, setTypeFilter] = useState<DownloadType | "all">("all");
-  const [questarrFilter, setQuestarrFilter] = useState<"all" | "questarr">("all");
 
   const {
     data: downloadsData,
@@ -135,22 +110,8 @@ export default function Downloads() {
     if (typeFilter !== "all") {
       filtered = filtered.filter((d) => (d.downloadType || "torrent") === typeFilter);
     }
-    if (questarrFilter === "questarr") {
-      filtered = filtered.filter((d) => d.trackedByQuestarr);
-    }
     return filtered;
-  }, [downloads, statusFilter, typeFilter, questarrFilter]);
-
-  // Collect unique active category filters from downloaders for the banner
-  const categoryBannerEntries = useMemo(() => {
-    const seen = new Map<string, string>(); // downloaderName → category
-    for (const d of downloads) {
-      if (d.downloaderCategory && !seen.has(d.downloaderName)) {
-        seen.set(d.downloaderName, d.downloaderCategory);
-      }
-    }
-    return Array.from(seen.entries());
-  }, [downloads]);
+  }, [downloads, statusFilter, typeFilter]);
 
   // Show toast notifications for downloader errors
   // Only show each error once per session to avoid spam
@@ -194,11 +155,6 @@ export default function Downloads() {
     setDetailsModalOpen(true);
   };
 
-  const invalidateDownloadCaches = () => {
-    queryClient.invalidateQueries({ queryKey: ["/api/downloads"] });
-    queryClient.invalidateQueries({ queryKey: ["/api/downloads/summary"] });
-  };
-
   const pauseMutation = useMutation({
     mutationFn: async ({
       downloaderId,
@@ -225,7 +181,7 @@ export default function Downloads() {
     onSuccess: (result) => {
       if (result.success) {
         toast({ title: "Download paused" });
-        invalidateDownloadCaches();
+        queryClient.invalidateQueries({ queryKey: ["/api/downloads"] });
       } else {
         toast({ title: result.message || "Failed to pause download", variant: "destructive" });
       }
@@ -261,7 +217,7 @@ export default function Downloads() {
     onSuccess: (result) => {
       if (result.success) {
         toast({ title: "Download resumed" });
-        invalidateDownloadCaches();
+        queryClient.invalidateQueries({ queryKey: ["/api/downloads"] });
       } else {
         toast({ title: result.message || "Failed to resume download", variant: "destructive" });
       }
@@ -299,7 +255,7 @@ export default function Downloads() {
     onSuccess: (result) => {
       if (result.success) {
         toast({ title: "Download removed" });
-        invalidateDownloadCaches();
+        queryClient.invalidateQueries({ queryKey: ["/api/downloads"] });
       } else {
         toast({ title: result.message || "Failed to remove download", variant: "destructive" });
       }
@@ -331,25 +287,9 @@ export default function Downloads() {
     });
   };
 
-  // Group downloads by downloader for the summary section
-  const downloaderSummaries = useMemo(() => {
-    const map = new Map<
-      string,
-      { name: string; counts: Partial<Record<DownloadStatusType, number>> }
-    >();
-    for (const d of downloads) {
-      if (!map.has(d.downloaderId)) {
-        map.set(d.downloaderId, { name: d.downloaderName, counts: {} });
-      }
-      const entry = map.get(d.downloaderId)!;
-      entry.counts[d.status] = (entry.counts[d.status] ?? 0) + 1;
-    }
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [downloads]);
-
   if (isLoading) {
     return (
-      <div className="p-6">
+      <div className="p-8">
         <div className="flex items-center space-x-2" data-testid="loading-downloads">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           <span data-testid="text-loading-downloads">Loading downloads...</span>
@@ -359,53 +299,22 @@ export default function Downloads() {
   }
 
   return (
-    <div className="h-full overflow-auto p-6">
-      <div className="flex justify-between items-center mb-6">
+    <div className="h-full overflow-auto p-8">
+      <div className="flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Downloads</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">
-            Monitor and manage active downloads
-          </p>
+          <h1 className="text-3xl font-bold">Downloads</h1>
+          <p className="text-muted-foreground">Monitor and manage active downloads</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="button-refresh">
+        <Button variant="outline" onClick={() => refetch()} data-testid="button-refresh">
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </Button>
       </div>
 
-      {/* Per-downloader summary */}
-      {downloaderSummaries.length > 0 && (
-        <div className="flex flex-wrap gap-3 mb-6">
-          {downloaderSummaries.map((dl) => (
-            <div
-              key={dl.name}
-              className="flex items-center gap-3 px-4 py-2 rounded-lg border bg-card text-sm"
-            >
-              <span className="font-medium shrink-0">{dl.name}</span>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                {STATUS_ORDER.filter((s) => (dl.counts[s] ?? 0) > 0).map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setStatusFilter(s)}
-                    className={`flex items-center gap-1 hover:underline transition-colors ${STATUS_COLORS[s]}`}
-                    aria-label={`Filter by ${s}`}
-                  >
-                    <span className="font-semibold">{dl.counts[s]}</span>
-                    <span className="text-muted-foreground">{s}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Filter row */}
-      <div className="flex flex-wrap items-center gap-6 mb-6">
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider shrink-0">
-            Status
-          </span>
+      {/* Status filter tabs */}
+      <div className="flex flex-col gap-4 mb-6">
+        <div className="flex flex-wrap items-center gap-4">
+          <span className="text-sm font-medium text-muted-foreground">Status:</span>
           <Tabs
             value={statusFilter}
             onValueChange={(value) => setStatusFilter(value as DownloadStatusType | "all")}
@@ -434,17 +343,15 @@ export default function Downloads() {
           </Tabs>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider shrink-0">
-            Protocol
-          </span>
+        <div className="flex flex-wrap items-center gap-4">
+          <span className="text-sm font-medium text-muted-foreground">Protocol:</span>
           <Tabs
             value={typeFilter}
             onValueChange={(value) => setTypeFilter(value as DownloadType | "all")}
             aria-label="Filter downloads by protocol"
           >
             <TabsList>
-              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="all">All Protocols</TabsTrigger>
               <TabsTrigger value="torrent" className="flex items-center gap-2">
                 <Download className="h-3 w-3" /> Torrents
               </TabsTrigger>
@@ -454,47 +361,7 @@ export default function Downloads() {
             </TabsList>
           </Tabs>
         </div>
-
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider shrink-0">
-            Source
-          </span>
-          <Tabs
-            value={questarrFilter}
-            onValueChange={(value) => setQuestarrFilter(value as "all" | "questarr")}
-            aria-label="Filter downloads by source"
-          >
-            <TabsList>
-              <TabsTrigger value="all" data-testid="filter-source-all">
-                All
-              </TabsTrigger>
-              <TabsTrigger
-                value="questarr"
-                className="flex items-center gap-2"
-                data-testid="filter-source-questarr"
-              >
-                <Download className="h-3 w-3" /> Questarr only
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
       </div>
-
-      {/* Category filter banner */}
-      {categoryBannerEntries.length > 0 && (
-        <div
-          className="flex items-center gap-2 mb-4 px-3 py-2 rounded-md bg-muted/50 text-muted-foreground text-sm"
-          data-testid="category-filter-banner"
-          role="status"
-          aria-live="polite"
-        >
-          <Tag className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span>
-            Category filter active —{" "}
-            {categoryBannerEntries.map(([name, cat]) => `${name}: "${cat}"`).join(", ")}
-          </span>
-        </div>
-      )}
 
       <div className="grid gap-4">
         {filteredDownloads.length > 0 ? (
@@ -714,7 +581,6 @@ export default function Downloads() {
                   <Progress
                     value={download.progress}
                     className="h-2"
-                    aria-label={`Download progress: ${download.progress.toFixed(1)}%`}
                     data-testid={`progress-bar-${download.id}`}
                   />
                   {download.error && (
@@ -733,34 +599,18 @@ export default function Downloads() {
           <Card data-testid="card-no-downloads">
             <CardHeader>
               <CardTitle data-testid="text-no-downloads-title">
-                {(() => {
-                  if (downloads.length === 0) return "No Active Downloads";
-                  const statusLabel =
-                    statusFilter === "all"
-                      ? "Active"
-                      : statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1);
-                  const typeLabel =
-                    typeFilter === "all"
-                      ? ""
-                      : typeFilter.charAt(0).toUpperCase() + typeFilter.slice(1) + " ";
-                  return `No ${statusLabel} ${typeLabel}Downloads`;
-                })()}
+                {downloads.length === 0
+                  ? "No Active Downloads"
+                  : `No ${
+                      statusFilter === "all"
+                        ? "Active"
+                        : statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1)
+                    } Downloads`}
               </CardTitle>
               <CardDescription data-testid="text-no-downloads-description">
-                {(() => {
-                  if (downloads.length === 0) {
-                    return "Use the Search page to find and download games from your configured indexers.";
-                  }
-                  const activeFilters: string[] = [];
-                  if (statusFilter !== "all") activeFilters.push(`Status: ${statusFilter}`);
-                  if (typeFilter !== "all")
-                    activeFilters.push(
-                      `Protocol: ${typeFilter.charAt(0).toUpperCase() + typeFilter.slice(1)}`
-                    );
-                  const filterText =
-                    activeFilters.length > 0 ? ` (${activeFilters.join(", ")})` : "";
-                  return `No downloads match the current filters${filterText}. Try adjusting the filters.`;
-                })()}
+                {downloads.length === 0
+                  ? "Use the Search page to find and download games from your configured indexers."
+                  : `No downloads match the "${statusFilter}" filter. Try selecting a different filter.`}
               </CardDescription>
             </CardHeader>
           </Card>

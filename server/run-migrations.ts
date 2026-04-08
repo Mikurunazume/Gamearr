@@ -1,4 +1,3 @@
-import "dotenv/config";
 import { runMigrations } from "./migrate.js";
 import { logger } from "./logger.js";
 

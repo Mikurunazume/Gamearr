@@ -1,9 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
-
-vi.mock("../steam-routes.js", () => ({
-  steamRoutes: (_req: unknown, _res: unknown, next: () => void) => next(),
-}));
-
+import { describe, it, expect } from "vitest";
 import { parseCategories } from "../routes.js";
 
 describe("parseCategories", () => {

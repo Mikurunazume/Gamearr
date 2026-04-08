@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Search, Plus, Star, AlertCircle, Calendar } from "lucide-react";
+import { Search, Plus, Star, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Game, type InsertGame, type Config } from "@shared/schema";
 import { mapGameToInsertGame } from "@/lib/utils";
@@ -167,7 +167,7 @@ export default function AddGameModal({ children }: AddGameModalProps) {
               </Button>
             </form>
 
-            <div className="space-y-4" aria-live="polite">
+            <div className="space-y-4">
               {isSearching && (
                 <div className="text-center py-8 text-muted-foreground">Searching games...</div>
               )}
@@ -200,12 +200,6 @@ export default function AddGameModal({ children }: AddGameModalProps) {
                             {game.title}
                           </h3>
                           <div className="flex items-center gap-2 flex-shrink-0">
-                            {game.releaseDate && (
-                              <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                                <Calendar className="w-3 h-3" />
-                                {new Date(game.releaseDate).getFullYear()}
-                              </div>
-                            )}
                             {game.rating && (
                               <div className="flex items-center gap-1 text-sm text-muted-foreground">
                                 <Star className="w-3 h-3 text-accent" />
@@ -248,7 +242,6 @@ export default function AddGameModal({ children }: AddGameModalProps) {
                               onClick={() => handleAddGame(game)}
                               disabled={addGameMutation.isPending}
                               data-testid={`button-add-${game.id}`}
-                              aria-label={`Add ${game.title} to collection`}
                             >
                               <Plus className="w-4 h-4 mr-1" />
                               Add

@@ -57,7 +57,7 @@ vi.mock("lucide-react", async (importOriginal) => {
 });
 
 describe("CompactGameCard", () => {
-  const mockGame = {
+  const mockGame: Game = {
     id: "1",
     title: "Test Game",
     coverUrl: "http://example.com/cover.jpg",
@@ -71,7 +71,7 @@ describe("CompactGameCard", () => {
     folderName: "Test Game",
     createdAt: new Date(),
     updatedAt: new Date(),
-  } as unknown as Game;
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -118,12 +118,25 @@ describe("CompactGameCard", () => {
     expect(onViewDetails).toHaveBeenCalledWith("1");
   });
 
-  it("shows a loading fallback when opening details", async () => {
-    renderWithProviders(<CompactGameCard game={mockGame} />);
+  describe("dynamic aria-labels for status button", () => {
+    it.each([
+      { status: "wanted" as const, expectedLabel: "Owned", expectedNext: "owned" },
+      { status: "owned" as const, expectedLabel: "Completed", expectedNext: "completed" },
+      { status: "completed" as const, expectedLabel: "Wanted", expectedNext: "wanted" },
+    ])(
+      "shows aria-label 'Mark $title as $expectedLabel' when status is $status",
+      ({ status, expectedLabel, expectedNext }) => {
+        const onStatusChange = vi.fn();
+        renderWithProviders(
+          <CompactGameCard game={{ ...mockGame, status }} onStatusChange={onStatusChange} />
+        );
 
-    const infoButton = screen.getByLabelText(`View details for ${mockGame.title}`);
-    fireEvent.click(infoButton);
+        const btn = screen.getByLabelText(`Mark ${mockGame.title} as ${expectedLabel}`);
+        expect(btn).toBeInTheDocument();
 
-    expect(await screen.findByText("Loading game details...")).toBeInTheDocument();
+        fireEvent.click(btn);
+        expect(onStatusChange).toHaveBeenCalledWith(mockGame.id, expectedNext);
+      }
+    );
   });
 });

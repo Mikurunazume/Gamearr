@@ -34,6 +34,5 @@ vite.config.ts.*
 docker-compose.*local.yml
 notes/
 sqlite.db*
-pr_status.json
 .omc/
 .sonarlint/connectedMode.json

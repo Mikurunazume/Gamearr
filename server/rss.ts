@@ -3,7 +3,6 @@ import { storage } from "./storage.js";
 import { igdbClient } from "./igdb.js";
 import { logger } from "./logger.js";
 import { RssFeed, InsertRssFeedItem } from "../shared/schema.js";
-import { safeFetch } from "./ssrf.js";
 
 const rssLogger = logger.child({ module: "rss" });
 
@@ -63,13 +62,8 @@ export class RssService {
   async refreshFeed(feed: RssFeed) {
     rssLogger.debug(`Fetching feed: ${feed.name} (${feed.url})`);
 
-    // Use safeFetch instead of directly parsing the URL to prevent DNS rebinding
-    const response = await safeFetch(feed.url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch feed: ${response.statusText}`);
-    }
-    const xmlData = await response.text();
-    const feedContent = await this.parser.parseString(xmlData);
+    // Set timeout for parsing
+    const feedContent = await this.parser.parseURL(feed.url);
 
     rssLogger.debug(`Parsed ${feedContent.items.length} items from ${feed.name}`);
 
@@ -113,7 +107,7 @@ export class RssService {
 
     // 4. Trigger background matching
     if (newIds.length > 0) {
-      this.processPendingItems(newIds).catch((err) => {
+      this.processPendingItems(newIds).catch(err => {
         rssLogger.error({ err }, "Error in background item processing");
       });
     }

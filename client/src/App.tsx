@@ -29,7 +29,6 @@ const XrelReleasesPage = lazy(() => import("@/pages/xrel-releases"));
 const RssPage = lazy(() => import("@/pages/rss"));
 const LoginPage = lazy(() => import("@/pages/auth/login"));
 const SetupPage = lazy(() => import("@/pages/auth/setup"));
-const StatsPage = lazy(() => import("@/pages/stats"));
 
 function Router() {
   return (
@@ -49,7 +48,6 @@ function Router() {
         <Route path="/wishlist" component={WishlistPage} />
         <Route path="/xrel" component={XrelReleasesPage} />
         <Route path="/rss" component={RssPage} />
-        <Route path="/stats" component={StatsPage} />
         <Route component={NotFound} />
       </Switch>
     </Suspense>
@@ -98,8 +96,6 @@ function App() {
         return "xREL.to releases";
       case "/rss":
         return "RSS Feeds";
-      case "/stats":
-        return "Statistics";
       default:
         return "Questarr";
     }

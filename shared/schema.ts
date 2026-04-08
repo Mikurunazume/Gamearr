@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -7,7 +7,6 @@ export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   username: text("username").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
-  steamId64: text("steam_id_64"),
 });
 
 export const userSettings = sqliteTable("user_settings", {
@@ -30,15 +29,7 @@ export const userSettings = sqliteTable("user_settings", {
   lastAutoSearch: integer("last_auto_search", { mode: "timestamp_ms" }),
   xrelSceneReleases: integer("xrel_scene_releases", { mode: "boolean" }).notNull().default(true),
   xrelP2pReleases: integer("xrel_p2p_releases", { mode: "boolean" }).notNull().default(false),
-  autoSearchUnreleased: integer("auto_search_unreleased", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  steamSyncFailures: integer("steam_sync_failures").notNull().default(0),
-  preferredReleaseGroups: text("preferred_release_groups"),
-  filterByPreferredGroups: integer("filter_by_preferred_groups", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).default(
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).default(
     sql`(strftime('%s', 'now') * 1000)`
   ),
 });
@@ -55,7 +46,6 @@ export const games = sqliteTable("games", {
   id: text("id").primaryKey(),
   userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
   igdbId: integer("igdb_id"),
-  steamAppId: integer("steam_appid"),
   title: text("title").notNull(),
   summary: text("summary"),
   coverUrl: text("cover_url"),
@@ -66,20 +56,10 @@ export const games = sqliteTable("games", {
   publishers: text("publishers", { mode: "json" }).$type<string[]>(),
   developers: text("developers", { mode: "json" }).$type<string[]>(),
   screenshots: text("screenshots", { mode: "json" }).$type<string[]>(),
-  source: text("source").default("manual"), // "manual" | "steam" | "api"
-  igdbWebsites: text("igdb_websites", { mode: "json" }).$type<
-    Array<{ category: number; url: string }>
-  >(),
-  aggregatedRating: real("aggregated_rating"),
   status: text("status").notNull().default("wanted"), // Enum validation handled by Zod
   originalReleaseDate: text("original_release_date"),
   releaseStatus: text("release_status").default("upcoming"), // Enum validation handled by Zod
-  earlyAccess: integer("early_access", { mode: "boolean" }).notNull().default(false),
-  hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
-  userRating: real("user_rating"),
-  searchResultsAvailable: integer("search_results_available", { mode: "boolean" })
-    .default(false)
-    .notNull(),
+  hidden: integer("hidden", { mode: "boolean" }).default(false),
   addedAt: integer("added_at", { mode: "timestamp_ms" }).default(
     sql`(strftime('%s', 'now') * 1000)`
   ),
@@ -145,7 +125,6 @@ export const gameDownloads = sqliteTable("game_downloads", {
   downloadHash: text("download_hash").notNull(),
   downloadTitle: text("download_title").notNull(),
   status: text("status").notNull().default("downloading"),
-  fileSize: integer("file_size"), // bytes, stored at completion when available
   addedAt: integer("added_at", { mode: "timestamp_ms" }).default(
     sql`(strftime('%s', 'now') * 1000)`
   ),
@@ -166,23 +145,6 @@ export const xrelNotifiedReleases = sqliteTable("xrel_notified_releases", {
     sql`(strftime('%s', 'now') * 1000)`
   ),
 });
-
-// Track releases blacklisted by users to hide them from per-game search results
-export const releaseBlacklist = sqliteTable(
-  "release_blacklist",
-  {
-    id: text("id").primaryKey(),
-    gameId: text("game_id")
-      .notNull()
-      .references(() => games.id, { onDelete: "cascade" }),
-    releaseTitle: text("release_title").notNull(),
-    indexerName: text("indexer_name"),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).default(
-      sql`(strftime('%s', 'now') * 1000)`
-    ),
-  },
-  (t) => [uniqueIndex("release_blacklist_game_title_idx").on(t.gameId, t.releaseTitle)]
-);
 
 export const notifications = sqliteTable("notifications", {
   id: text("id").primaryKey(),
@@ -229,38 +191,13 @@ export const updateGameHiddenSchema = z.object({
   hidden: z.boolean(),
 });
 
-export const updateGameUserRatingSchema = z.object({
-  userRating: z
-    .number()
-    .min(0.5, "userRating must be at least 0.5")
-    .max(10, "userRating must be at most 10")
-    .refine((v) => v * 2 === Math.round(v * 2), {
-      message: "userRating must be in 0.5 increments",
-    })
-    .nullable(),
-});
-
-export const insertIndexerSchema = createInsertSchema(indexers, {
-  name: (schema) => schema.trim(),
-  url: (schema) => schema.trim(),
-  apiKey: (schema) => schema.trim(),
-}).omit({
+export const insertIndexerSchema = createInsertSchema(indexers).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
 });
 
-// Trim helper for nullable/optional string fields in Zod schemas.
-const trimIfString = <T>(v: T): T => (typeof v === "string" ? (v.trim() as T) : v);
-
-export const insertDownloaderSchema = createInsertSchema(downloaders, {
-  name: (schema) => schema.trim(),
-  url: (schema) => schema.trim(),
-  username: (schema) => schema.transform(trimIfString),
-  password: (schema) => schema.transform(trimIfString),
-  urlPath: (schema) => schema.transform(trimIfString),
-  downloadPath: (schema) => schema.transform(trimIfString),
-}).omit({
+export const insertDownloaderSchema = createInsertSchema(downloaders).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -297,13 +234,6 @@ export const insertXrelNotifiedReleaseSchema = createInsertSchema(xrelNotifiedRe
   createdAt: true,
 });
 
-export const insertReleaseBlacklistSchema = createInsertSchema(releaseBlacklist).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertReleaseBlacklist = (typeof insertReleaseBlacklistSchema)["_output"];
-export type ReleaseBlacklist = typeof releaseBlacklist.$inferSelect;
-
 export const insertUserSettingsSchema = createInsertSchema(userSettings).omit({
   id: true,
   updatedAt: true,
@@ -319,9 +249,9 @@ export const updateUserSettingsSchema = createInsertSchema(userSettings)
 
 export const updatePasswordSchema = z
   .object({
-    currentPassword: z.string().trim().min(1, "Current password is required"),
-    newPassword: z.string().trim().min(6, "New password must be at least 6 characters"),
-    confirmPassword: z.string().trim().min(1, "Confirm password is required"),
+    currentPassword: z.string().min(1, "Current password is required"),
+    newPassword: z.string().min(6, "New password must be at least 6 characters"),
+    confirmPassword: z.string().min(1, "Confirm password is required"),
   })
   .refine((data) => data.newPassword === data.confirmPassword, {
     message: "Passwords do not match",
@@ -367,12 +297,6 @@ export type UserSettings = typeof userSettings.$inferSelect;
 export type InsertUserSettings = (typeof insertUserSettingsSchema)["_output"];
 export type UpdateUserSettings = (typeof updateUserSettingsSchema)["_output"];
 
-export interface DownloadSummary {
-  topStatus: "downloading" | "paused" | "failed" | "completed";
-  count: number;
-  downloadTypes: ("torrent" | "usenet")[];
-}
-
 // Application configuration type
 export interface Config {
   igdb: {
@@ -382,9 +306,6 @@ export interface Config {
   };
   xrel?: {
     apiBase: string;
-  };
-  discord?: {
-    webhookConfigured: boolean;
   };
 }
 
@@ -430,9 +351,6 @@ export interface DownloadStatus {
   // Common fields
   error?: string;
   category?: string;
-  // Questarr tracking fields
-  trackedByQuestarr?: boolean; // True if the download was initiated through Questarr
-  downloaderCategory?: string; // The category configured on the downloader (for display purposes)
 }
 
 export interface DownloadDetails extends DownloadStatus {

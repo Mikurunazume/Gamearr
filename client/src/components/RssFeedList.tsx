@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { RssFeedItem } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,14 +8,16 @@ import { ExternalLink, RefreshCw, AlertTriangle, LayoutGrid, List } from "lucide
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 import CompactRssFeedItem from "./CompactRssFeedItem";
-import { cn, safeUrl } from "@/lib/utils";
-import { useLocalStorageState } from "@/hooks/use-local-storage-state";
+import { cn } from "@/lib/utils";
 
 export default function RssFeedList() {
-  const [viewMode, setViewMode] = useLocalStorageState(
-    "rssFeedViewMode",
-    "grid" as "grid" | "list"
-  );
+  const [viewMode, setViewMode] = useState<"grid" | "list">(() => {
+    return (localStorage.getItem("rssFeedViewMode") as "grid" | "list") || "grid";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("rssFeedViewMode", viewMode);
+  }, [viewMode]);
 
   const {
     data: items,
@@ -89,13 +92,11 @@ export default function RssFeedList() {
         </Button>
       </div>
 
-      <div
-        className={cn(
-          "grid gap-4",
-          viewMode === "grid" ? "md:grid-cols-2 lg:grid-cols-3" : "grid-cols-1"
-        )}
-      >
-        {items.map((item) =>
+      <div className={cn(
+        "grid gap-4",
+        viewMode === "grid" ? "md:grid-cols-2 lg:grid-cols-3" : "grid-cols-1"
+      )}>
+        {items.map((item) => (
           viewMode === "list" ? (
             <CompactRssFeedItem key={item.id} item={item} />
           ) : (
@@ -134,7 +135,7 @@ export default function RssFeedList() {
               </CardHeader>
               <CardContent className="p-4 pt-0 mt-auto">
                 <a
-                  href={safeUrl(item.link)}
+                  href={item.link}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs text-primary hover:underline flex items-center gap-1 mt-2"
@@ -145,7 +146,7 @@ export default function RssFeedList() {
               </CardContent>
             </Card>
           )
-        )}
+        ))}
       </div>
     </div>
   );

@@ -1,1 +1,0 @@
-ALTER TABLE `user_settings` ADD `auto_search_unreleased` integer DEFAULT false NOT NULL;

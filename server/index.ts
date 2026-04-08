@@ -1,13 +1,13 @@
 // Force restart trigger
 import "dotenv/config";
-import express from "express";
+import express, { type Request, Response, NextFunction } from "express";
 import https from "https";
 import fs from "fs";
 import cors from "cors";
 
 import { registerRoutes } from "./routes.js";
 import { setupVite, serveStatic, log } from "./vite.js";
-import { generalApiLimiter, errorHandler } from "./middleware.js";
+import { generalApiLimiter } from "./middleware.js";
 import { config } from "./config.js";
 import { expressLogger } from "./logger.js";
 import { startCronJobs } from "./cron.js";
@@ -16,16 +16,12 @@ import { ensureDatabase } from "./migrate.js";
 import { rssService } from "./rss.js";
 
 const app = express();
-if (config.server.isProduction) {
-  app.set("trust proxy", 1);
-}
 app.use(
   cors({
     origin: config.server.allowedOrigins,
-    credentials: true,
   })
 );
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
 // Apply general rate limiting to all API routes
@@ -145,8 +141,21 @@ app.use((req, res, next) => {
     setupSocketIO(server);
 
     // Error handler must handle various error shapes
-    // 🛡️ Sentinel: Use standardized error handler to prevent info leaks
-    app.use(errorHandler);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+      const status = err.status || err.statusCode || 500;
+      const error = err.message || "Internal Server Error";
+
+      // Include details if available (e.g., validation errors)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response: { error: string; details?: any } = { error };
+      if (err.details) {
+        response.details = err.details;
+      }
+
+      res.status(status).json(response);
+      throw err;
+    });
 
     // importantly only setup vite in development and after
     // setting up all the other routes so the catch-all route

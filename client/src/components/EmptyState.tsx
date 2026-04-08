@@ -1,16 +1,15 @@
 import React from "react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { type IconComponent } from "@/types/components";
 
 interface EmptyStateProps {
-  icon: IconComponent;
+  icon: LucideIcon;
   title: string;
   description: string;
   actionLabel?: string;
   actionLink?: string;
-  onAction?: () => void;
   className?: string;
 }
 
@@ -20,7 +19,6 @@ export default function EmptyState({
   description,
   actionLabel,
   actionLink,
-  onAction,
   className,
 }: EmptyStateProps) {
   return (
@@ -36,11 +34,6 @@ export default function EmptyState({
       {actionLabel && actionLink && (
         <Button size="lg" className="font-semibold" asChild>
           <Link href={actionLink}>{actionLabel}</Link>
-        </Button>
-      )}
-      {actionLabel && onAction && (
-        <Button size="lg" className="font-semibold" onClick={onAction}>
-          {actionLabel}
         </Button>
       )}
     </div>

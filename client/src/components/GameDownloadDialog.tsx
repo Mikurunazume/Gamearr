@@ -55,7 +55,6 @@ import {
   ArrowUp,
   ArrowDown,
   Activity,
-  Ban,
 } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
@@ -68,7 +67,7 @@ import {
   downloadRulesSchema,
 } from "@shared/schema";
 import { groupDownloadsByCategory, type DownloadCategory } from "@shared/download-categorizer";
-import { parseReleaseMetadata, parseJsonStringArray } from "@shared/title-utils";
+import { parseReleaseMetadata } from "@shared/title-utils";
 
 interface DownloadItem {
   title: string;
@@ -88,7 +87,6 @@ interface DownloadItem {
   // Usenet-specific fields
   grabs?: number;
   age?: number;
-  files?: number;
   poster?: string;
   group?: string;
 }
@@ -115,14 +113,12 @@ function formatDate(dateString: string): string {
 }
 
 import { apiRequest } from "@/lib/queryClient";
-import { useDebounce } from "@/hooks/use-debounce";
 import { formatBytes, formatAge, isUsenetItem } from "@/lib/downloads-utils";
 
 export default function GameDownloadDialog({ game, open, onOpenChange }: GameDownloadDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
-  const debouncedSearchQuery = useDebounce(searchQuery, 300);
   const [downloadingGuid, setDownloadingGuid] = useState<string | null>(null);
   const [showBundleDialog, setShowBundleDialog] = useState(false);
   const [selectedMainDownload, setSelectedMainDownload] = useState<DownloadItem | null>(null);
@@ -139,7 +135,6 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
     new Set(["main", "update", "dlc", "extra"] as DownloadCategory[])
   );
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
-  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
 
   const setDefaults = useCallback(() => {
     setSearchQuery("");
@@ -154,7 +149,6 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
     setShowFilters(false);
     setVisibleCategories(new Set(["main", "update", "dlc", "extra"] as DownloadCategory[]));
     setSelectedGroups([]);
-    setSelectedPlatforms([]);
   }, []);
 
   const { data: userSettings } = useQuery<UserSettings>({
@@ -176,17 +170,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
         console.warn("Failed to apply download rules from settings", error);
       }
     }
-    if (userSettings?.filterByPreferredGroups) {
-      const groups = parseJsonStringArray(userSettings.preferredReleaseGroups);
-      if (groups.length > 0) {
-        setSelectedGroups(groups);
-      }
-    }
-  }, [
-    userSettings?.downloadRules,
-    userSettings?.filterByPreferredGroups,
-    userSettings?.preferredReleaseGroups,
-  ]);
+  }, [userSettings?.downloadRules]);
 
   // Auto-populate search when dialog opens with game title
   useEffect(() => {
@@ -198,13 +182,9 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
     }
   }, [open, game, applyDownloadRules, setDefaults]);
 
-  const searchQueryKey = game?.id
-    ? `/api/search?query=${encodeURIComponent(debouncedSearchQuery)}&gameId=${game.id}`
-    : `/api/search?query=${encodeURIComponent(debouncedSearchQuery)}`;
-
   const { data: searchResults, isLoading: isSearching } = useQuery<SearchResult>({
-    queryKey: [searchQueryKey],
-    enabled: open && debouncedSearchQuery.trim().length > 0,
+    queryKey: [`/api/search?query=${encodeURIComponent(searchQuery)}`],
+    enabled: open && searchQuery.trim().length > 0,
   });
 
   const { data: enabledIndexers } = useQuery<Indexer[]>({
@@ -243,35 +223,6 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
     return Array.from(groups).sort();
   }, [searchResults?.items]);
 
-  // Pre-calculate release metadata once per item to avoid repeated regex operations
-  const itemsMetadata = useMemo(() => {
-    if (!searchResults?.items) return new Map<string, ReturnType<typeof parseReleaseMetadata>>();
-    return new Map(
-      searchResults.items.map((item) => [item.title, parseReleaseMetadata(item.title)])
-    );
-  }, [searchResults?.items]);
-
-  const availablePlatforms = useMemo(() => {
-    const platforms = new Set(
-      Array.from(itemsMetadata.values())
-        .map((meta) => meta.platform)
-        .filter((p): p is string => Boolean(p))
-    );
-    return Array.from(platforms)
-      .sort((a, b) => a.localeCompare(b))
-      .map((p) => ({ label: p, value: p }));
-  }, [itemsMetadata]);
-
-  // Remove stale platform selections when available platforms change
-  useEffect(() => {
-    const validValues = new Set(availablePlatforms.map((p) => p.value));
-    setSelectedPlatforms((prev) => {
-      if (prev.length === 0) return prev;
-      const filtered = prev.filter((p) => validValues.has(p));
-      return filtered.length !== prev.length ? filtered : prev;
-    });
-  }, [availablePlatforms]);
-
   // Apply filters and sorting
   const filteredCategorizedDownloads = useMemo(() => {
     const filtered: Record<DownloadCategory, DownloadItem[]> = {
@@ -291,18 +242,10 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
         .filter((t) => (t.seeders ?? 0) >= minSeeders)
         .filter((t) => selectedIndexer === "all" || t.indexerName === selectedIndexer)
         .filter((t) => selectedGroups.length === 0 || (t.group && selectedGroups.includes(t.group)))
-        .filter((t) => {
-          if (selectedPlatforms.length === 0) return true;
-          const platform = itemsMetadata.get(t.title)?.platform;
-          return platform ? selectedPlatforms.includes(platform) : false;
-        })
         .sort((a, b) => {
           let comparison = 0;
           if (sortBy === "seeders") {
-            // Health metric: seeders for torrents, grabs for Usenet
-            const aHealth = isUsenetItem(a) ? (a.grabs ?? 0) : (a.seeders ?? 0);
-            const bHealth = isUsenetItem(b) ? (b.grabs ?? 0) : (b.seeders ?? 0);
-            comparison = bHealth - aHealth;
+            comparison = (b.seeders ?? 0) - (a.seeders ?? 0);
           } else if (sortBy === "date") {
             comparison = new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime();
           } else {
@@ -316,14 +259,12 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
     return filtered;
   }, [
     categorizedDownloads,
-    itemsMetadata,
     minSeeders,
     selectedIndexer,
     sortBy,
     sortOrder,
     visibleCategories,
     selectedGroups,
-    selectedPlatforms,
   ]);
 
   // Sorted items for display (by date)
@@ -352,23 +293,13 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
       return results;
     },
     onSuccess: (results) => {
-      const successfulResults = results.filter((r) => r.success);
-      const successCount = successfulResults.length;
-      if (successCount === 0) {
-        toast({ title: "Failed to start download", variant: "destructive" });
-        return;
-      }
-      const downloaderNames = Array.from(
-        new Set(successfulResults.map((r) => r.downloaderName).filter(Boolean))
-      );
-      const titleSuffix = downloaderNames.length === 1 ? ` to ${downloaderNames[0]}` : "";
+      const successCount = results.filter((r) => r.success).length;
       toast({
-        title: `${successCount} download(s) sent${titleSuffix}`,
+        title: `${successCount} download(s) started successfully`,
         description:
           results.length > 1 ? `Added ${successCount} of ${results.length} downloads` : undefined,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/downloads"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/downloads/summary"] });
       onOpenChange(false);
     },
     onError: (error: Error) => {
@@ -392,7 +323,6 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
     }: {
       download: DownloadItem;
       downloaderId: string;
-      downloaderName: string;
     }) => {
       const response = await apiRequest("POST", `/api/downloaders/${downloaderId}/downloads`, {
         url: download.link,
@@ -402,11 +332,11 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
       });
       return response.json();
     },
-    onSuccess: (result, variables) => {
+    onSuccess: (result) => {
       if (result.success) {
-        toast({ title: `Download sent to ${variables.downloaderName}` });
+        toast({ title: "Download started successfully" });
         queryClient.invalidateQueries({ queryKey: ["/api/downloads"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/downloads/summary"] });
+        onOpenChange(false);
       } else {
         toast({ title: result.message || "Failed to start download", variant: "destructive" });
       }
@@ -417,27 +347,6 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
         description: error.message,
         variant: "destructive",
       });
-    },
-  });
-
-  const blacklistMutation = useMutation({
-    mutationFn: async (item: DownloadItem) => {
-      if (!game) throw new Error("No game context");
-      await apiRequest("POST", `/api/games/${game.id}/blacklist`, {
-        releaseTitle: item.title,
-        indexerName: item.indexerName ?? null,
-      });
-    },
-    onSuccess: (_data, item) => {
-      queryClient.setQueryData<SearchResult>([searchQueryKey], (old) => {
-        if (!old) return old;
-        return { ...old, items: old.items.filter((i) => i.title !== item.title) };
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/blacklist"] });
-      toast({ description: "Release blacklisted" });
-    },
-    onError: () => {
-      toast({ variant: "destructive", description: "Failed to blacklist release" });
     },
   });
 
@@ -657,7 +566,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col ">
+      <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle>Download {game.title}</DialogTitle>
           <DialogDescription>
@@ -698,7 +607,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
           </div>
 
           {showFilters && (
-            <div className="grid grid-cols-4 gap-4 p-4 border rounded-md bg-muted/50">
+            <div className="grid grid-cols-3 gap-4 p-4 border rounded-md bg-muted/50">
               <div className="space-y-2">
                 <Label htmlFor="indexer" className="text-sm">
                   Indexer
@@ -737,20 +646,6 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
               </div>
 
               <div className="space-y-2">
-                <Label className="text-sm">Platform</Label>
-                <MultiSelect
-                  options={availablePlatforms}
-                  selected={selectedPlatforms}
-                  onChange={setSelectedPlatforms}
-                  placeholder={
-                    availablePlatforms.length === 0 ? "No platforms detected" : "All platforms"
-                  }
-                  className="w-full"
-                  disabled={availablePlatforms.length === 0}
-                />
-              </div>
-
-              <div className="space-y-2">
                 <Label htmlFor="minSeeders" className="text-sm">
                   Min Seeders
                 </Label>
@@ -764,7 +659,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                 />
               </div>
 
-              <div className="col-span-4 space-y-2">
+              <div className="col-span-3 space-y-2">
                 <Label className="text-sm">Categories</Label>
                 <div className="flex flex-wrap gap-2">
                   {(["main", "update", "dlc", "extra"] as const).map((cat) => (
@@ -794,7 +689,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
           )}
         </div>
 
-        <div className="flex-1 mt-4 overflow-y-auto min-h-0">
+        <ScrollArea className="flex-1 mt-4 overflow-y-auto">
           <div className="space-y-4 pr-4">
             {isSearching && (
               <div className="flex items-center justify-center py-8">
@@ -840,9 +735,9 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                       </div>
 
                       {/* Downloads in this category */}
-                      <div className="border rounded-md divide-y mb-4 bg-card">
+                      <div className="border rounded-md divide-y mb-4 bg-card overflow-hidden">
                         {/* Sticky Sort Header */}
-                        <div className="sticky top-0 z-10 bg-muted/95 backdrop-blur-md p-3 text-xs font-bold flex items-center px-4 border-b rounded-t-md group">
+                        <div className="sticky top-0 z-10 bg-muted/95 backdrop-blur-md p-3 text-[10px] font-bold flex items-center px-4 border-b group">
                           <div className="flex-1 flex items-center">
                             <span className="text-muted-foreground/70 uppercase tracking-widest">
                               Release Information
@@ -872,9 +767,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
 
                         {downloadsInCategory.map((download: DownloadItem) => {
                           const isUsenet = isUsenetItem(download);
-                          const metadata =
-                            itemsMetadata.get(download.title) ??
-                            parseReleaseMetadata(download.title);
+                          const metadata = parseReleaseMetadata(download.title);
 
                           // Health calculation
                           let healthColor = "text-muted-foreground";
@@ -925,7 +818,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                                     </Tooltip>
 
                                     <h4 className="font-bold text-base truncate leading-tight">
-                                      {download.title}
+                                      {metadata.gameTitle || download.title}
                                     </h4>
 
                                     {isNew && (
@@ -943,7 +836,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                                     {metadata.version && (
                                       <Badge
                                         variant="secondary"
-                                        className="h-5 px-1.5 text-xs font-mono bg-blue-500/10 text-blue-600 dark:text-blue-400 border-none"
+                                        className="h-5 px-1.5 text-[10px] font-mono bg-blue-500/10 text-blue-600 dark:text-blue-400 border-none"
                                       >
                                         {metadata.version}
                                       </Badge>
@@ -952,7 +845,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                                       <Badge
                                         key={lang}
                                         variant="secondary"
-                                        className="h-5 px-1.5 text-xs bg-green-500/10 text-green-600 dark:text-green-400 border-none"
+                                        className="h-5 px-1.5 text-[10px] bg-green-500/10 text-green-600 dark:text-green-400 border-none"
                                       >
                                         {lang}
                                       </Badge>
@@ -960,7 +853,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                                     {metadata.drm && (
                                       <Badge
                                         variant="secondary"
-                                        className="h-5 px-1.5 text-xs bg-purple-500/10 text-purple-600 dark:text-purple-400 border-none"
+                                        className="h-5 px-1.5 text-[10px] bg-purple-500/10 text-purple-600 dark:text-purple-400 border-none"
                                       >
                                         {metadata.drm}
                                       </Badge>
@@ -968,7 +861,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                                     {metadata.platform && (
                                       <Badge
                                         variant="secondary"
-                                        className="h-5 px-1.5 text-xs bg-orange-500/10 text-orange-600 dark:text-orange-400 border-none"
+                                        className="h-5 px-1.5 text-[10px] bg-orange-500/10 text-orange-600 dark:text-orange-400 border-none"
                                       >
                                         {metadata.platform}
                                       </Badge>
@@ -976,41 +869,31 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                                     {metadata.isScene && (
                                       <Badge
                                         variant="outline"
-                                        className="h-5 px-1.5 text-xs border-muted-foreground/30 text-muted-foreground uppercase tracking-tighter"
+                                        className="h-5 px-1.5 text-[10px] border-muted-foreground/30 text-muted-foreground uppercase tracking-tighter"
                                       >
                                         Scene
-                                      </Badge>
-                                    )}
-                                    {!isUsenet && download.downloadVolumeFactor === 0 && (
-                                      <Badge
-                                        variant="secondary"
-                                        className="h-5 px-1.5 text-[10px] bg-emerald-500/15 text-emerald-500 dark:text-emerald-400 border-none uppercase tracking-tighter"
-                                      >
-                                        Freeleech
                                       </Badge>
                                     )}
                                   </div>
 
                                   {/* Release info line */}
                                   <div className="flex items-center gap-2 text-[11px] text-muted-foreground/70">
+                                    <span
+                                      className="font-medium truncate max-w-[300px]"
+                                      title={download.title}
+                                    >
+                                      {download.title}
+                                    </span>
                                     {metadata.group && (
-                                      <span className="font-bold text-foreground/50">
-                                        {metadata.group}
-                                      </span>
-                                    )}
-                                    {metadata.group && <span>•</span>}
-                                    <span>{download.indexerName}</span>
-                                    {isUsenet && download.poster && (
                                       <>
                                         <span>•</span>
-                                        <span
-                                          className="truncate max-w-[160px]"
-                                          title={download.poster}
-                                        >
-                                          {download.poster}
+                                        <span className="font-bold text-foreground/50">
+                                          {metadata.group}
                                         </span>
                                       </>
                                     )}
+                                    <span>•</span>
+                                    <span>{download.indexerName}</span>
                                   </div>
                                 </div>
 
@@ -1021,7 +904,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                                     <div className="text-xs font-medium">
                                       {formatDate(download.pubDate)}
                                     </div>
-                                    <div className="text-xs text-muted-foreground/50">
+                                    <div className="text-[10px] text-muted-foreground/50">
                                       {formatAge(isUsenet ? download.age : hoursOld / 24)}
                                     </div>
                                   </div>
@@ -1029,11 +912,6 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                                   {/* Size Column */}
                                   <div className="min-w-[70px] text-right font-mono text-xs font-bold">
                                     {download.size ? formatBytes(download.size) : "-"}
-                                    {isUsenet && download.files != null && (
-                                      <div className="text-[10px] font-sans font-normal text-muted-foreground/60">
-                                        {download.files} files
-                                      </div>
-                                    )}
                                   </div>
 
                                   {/* Health Column */}
@@ -1047,14 +925,9 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                                       <Activity className="h-3 w-3" />
                                       {isUsenet ? (download.grabs ?? 0) : (download.seeders ?? 0)}
                                     </div>
-                                    <div className="text-xs uppercase font-bold opacity-70">
+                                    <div className="text-[10px] uppercase font-bold opacity-70">
                                       {isUsenet ? "Grabs" : "Seeds"}
                                     </div>
-                                    {!isUsenet && download.leechers != null && (
-                                      <div className="text-[10px] text-muted-foreground/60">
-                                        {download.leechers}L
-                                      </div>
-                                    )}
                                   </div>
 
                                   {/* Actions Column */}
@@ -1067,6 +940,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                                         downloadingGuid === (download.guid || download.link)
                                       }
                                       className="h-9 w-9 hover:bg-primary hover:text-primary-foreground transition-all"
+                                      aria-label={`Download ${download.title.replace(/[._]/g, " ")}`}
                                     >
                                       {downloadingGuid === (download.guid || download.link) ? (
                                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -1077,7 +951,12 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
 
                                     <DropdownMenu>
                                       <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" size="icon" className="h-9 w-9">
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-9 w-9"
+                                          aria-label="More options"
+                                        >
                                           <MoreVertical className="h-4 w-4" />
                                         </Button>
                                       </DropdownMenuTrigger>
@@ -1122,7 +1001,6 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                                                         sendToDownloaderMutation.mutate({
                                                           download,
                                                           downloaderId: d.id,
-                                                          downloaderName: d.name,
                                                         })
                                                       }
                                                     >
@@ -1134,13 +1012,6 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
                                             </DropdownMenuSub>
                                           );
                                         })()}
-                                        <DropdownMenuItem
-                                          onClick={() => blacklistMutation.mutate(download)}
-                                          className="text-destructive focus:text-destructive"
-                                        >
-                                          <Ban className="h-4 w-4 mr-2" />
-                                          Blacklist release
-                                        </DropdownMenuItem>
                                       </DropdownMenuContent>
                                     </DropdownMenu>
                                   </div>
@@ -1173,7 +1044,7 @@ export default function GameDownloadDialog({ game, open, onOpenChange }: GameDow
               </Card>
             )}
           </div>
-        </div>
+        </ScrollArea>
       </DialogContent>
 
       {/* Bundle Confirmation Dialog */}

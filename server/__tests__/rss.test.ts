@@ -2,23 +2,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { RssService } from "../rss.js";
 import { storage } from "../storage.js";
 import { igdbClient } from "../igdb.js";
+import { type RssFeedItem } from "../../shared/schema.js";
 
 const mocks = vi.hoisted(() => ({
-  parseString: vi.fn(),
-  safeFetch: vi.fn(),
+  parseURL: vi.fn(),
 }));
 
 vi.mock("rss-parser", () => {
   return {
     default: class {
-      parseString = mocks.parseString;
+      parseURL = mocks.parseURL;
     },
   };
 });
-
-vi.mock("../ssrf.js", () => ({
-  safeFetch: mocks.safeFetch,
-}));
 
 vi.mock("../storage.js");
 vi.mock("../igdb.js");
@@ -28,12 +24,6 @@ describe("RssService", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default to safe fetch for tests
-    mocks.safeFetch.mockResolvedValue({
-      ok: true,
-      text: vi.fn().mockResolvedValue("<xml></xml>"),
-    });
-
     rssService = new RssService();
   });
 
@@ -52,7 +42,7 @@ describe("RssService", () => {
     ] as unknown as import("../../shared/schema").RssFeed[]);
     vi.mocked(storage.getRssFeedItemByGuid).mockResolvedValue(undefined); // Item doesn't exist
 
-    mocks.parseString.mockResolvedValue({
+    mocks.parseURL.mockResolvedValue({
       items: [
         {
           title: "My Game v1.0 - Repack",
@@ -75,20 +65,19 @@ describe("RssService", () => {
     vi.mocked(storage.addRssFeedItem).mockResolvedValue({
       id: "item-1",
       title: "My Game v1.0 - Repack",
-    } as unknown as import("../../shared/schema").RssFeedItem);
+    } as unknown as RssFeedItem);
 
     // Mock getRssFeedItem for background process
     vi.mocked(storage.getRssFeedItem).mockResolvedValue({
       id: "item-1",
       title: "My Game v1.0 - Repack",
       igdbGameId: null,
-    } as unknown as import("../../shared/schema").RssFeedItem);
+    } as unknown as RssFeedItem);
 
     await rssService.refreshFeeds();
 
     expect(storage.getAllRssFeeds).toHaveBeenCalled();
-    expect(mocks.safeFetch).toHaveBeenCalledWith(mockFeed.url);
-    expect(mocks.parseString).toHaveBeenCalledWith("<xml></xml>");
+    expect(mocks.parseURL).toHaveBeenCalledWith(mockFeed.url);
 
     // 1. Check immediate insertion (should have null matches)
     expect(storage.addRssFeedItem).toHaveBeenCalledWith(
@@ -131,7 +120,7 @@ describe("RssService", () => {
     vi.mocked(storage.getAllRssFeeds).mockResolvedValue([
       mockFeed,
     ] as unknown as import("../../shared/schema").RssFeed[]);
-    mocks.parseString.mockRejectedValue(new Error("Parsing failed"));
+    mocks.parseURL.mockRejectedValue(new Error("Parsing failed"));
 
     await rssService.refreshFeeds();
 
@@ -140,33 +129,6 @@ describe("RssService", () => {
       expect.objectContaining({
         status: "error",
         errorMessage: "Parsing failed",
-      })
-    );
-  });
-
-  it("should handle SSRF/unsafe URL errors gracefully", async () => {
-    const mockFeed = {
-      id: "feed-unsafe",
-      name: "Unsafe Feed",
-      url: "http://169.254.169.254/latest/meta-data",
-      enabled: true,
-    };
-
-    vi.mocked(storage.getAllRssFeeds).mockResolvedValue([
-      mockFeed,
-    ] as unknown as import("../../shared/schema").RssFeed[]);
-
-    // Mock safeFetch to reject
-    mocks.safeFetch.mockRejectedValue(new Error("Invalid or unsafe URL"));
-
-    await rssService.refreshFeeds();
-
-    expect(mocks.parseString).not.toHaveBeenCalled();
-    expect(storage.updateRssFeed).toHaveBeenCalledWith(
-      mockFeed.id,
-      expect.objectContaining({
-        status: "error",
-        errorMessage: expect.stringMatching(/Invalid or unsafe URL/),
       })
     );
   });
@@ -184,7 +146,7 @@ describe("RssService", () => {
       mockFeed,
     ] as unknown as import("../../shared/schema").RssFeed[]);
 
-    mocks.parseString.mockResolvedValue({
+    mocks.parseURL.mockResolvedValue({
       items: [
         {
           customTitle: "Custom Game Title",
@@ -212,7 +174,8 @@ describe("RssService", () => {
     } as import("../../shared/schema").RssFeed;
     vi.mocked(storage.getAllRssFeeds).mockResolvedValue([mockFeed]);
 
-    mocks.parseString.mockResolvedValue({
+    // Return same game twice
+    mocks.parseURL.mockResolvedValue({
       items: [
         { title: "Game A v1", link: "l1", guid: "g1" },
         { title: "Game A v2", link: "l2", guid: "g2" },
@@ -225,15 +188,10 @@ describe("RssService", () => {
 
     // Mock returns
     vi.mocked(storage.addRssFeedItem).mockImplementation(
-      async (item) =>
-        ({
-          ...item,
-          id: Math.random().toString(),
-        }) as unknown as import("../../shared/schema").RssFeedItem
+      async (item) => ({ ...item, id: Math.random().toString() }) as unknown as RssFeedItem
     );
     vi.mocked(storage.getRssFeedItem).mockImplementation(
-      async (id) =>
-        ({ title: "Game A", id }) as unknown as import("../../shared/schema").RssFeedItem
+      async (id) => ({ title: "Game A", id }) as unknown as RssFeedItem
     );
 
     await rssService.refreshFeeds();
@@ -241,7 +199,7 @@ describe("RssService", () => {
     // Wait for background processing
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    // Should be called once per unique game name extraction
+    // Should be called once per unique game name extraction (assuming extraction works same for both)
     expect(igdbClient.searchGames).toHaveBeenCalledTimes(1);
     expect(storage.addRssFeedItem).toHaveBeenCalledTimes(2);
   });

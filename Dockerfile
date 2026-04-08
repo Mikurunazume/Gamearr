@@ -1,21 +1,24 @@
-# Install all dependencies (dev + prod) for building
-FROM node:22-alpine AS base
+# Build stage with shared dependencies
+FROM node:22-alpine@sha256:4d64b49e6c891c8fc821007cb1cdc6c0db7773110ac2c34bf2e6960adef62ed3 AS base
 
 WORKDIR /app
 
 COPY package*.json ./
 RUN npm ci
 
-# Build client and server
+# Build stage
 FROM base AS builder
 
 WORKDIR /app
 
+COPY --from=base /app/node_modules ./node_modules
 COPY . .
+
+# Build client and server
 RUN npm run build
 
 # Production stage
-FROM node:22-alpine AS production
+FROM node:22-alpine@sha256:4d64b49e6c891c8fc821007cb1cdc6c0db7773110ac2c34bf2e6960adef62ed3 AS production
 
 WORKDIR /app
 
@@ -29,10 +32,9 @@ ENV PGID=1000
 # Install su-exec (for privilege dropping) and shadow (for usermod/groupmod)
 RUN apk add --no-cache su-exec shadow
 
-# Reuse node_modules from base and prune dev dependencies (avoids a second npm ci)
-COPY --from=base /app/node_modules ./node_modules
+# Install production dependencies only
 COPY package*.json ./
-RUN npm prune --omit=dev
+RUN npm ci --omit=dev
 
 # Copy necessary files from build stage
 COPY --from=builder /app/dist ./dist
@@ -66,4 +68,4 @@ LABEL org.opencontainers.image.description="A video game management application 
 LABEL org.opencontainers.image.authors="Doezer"
 LABEL org.opencontainers.image.source="https://github.com/Doezer/questarr"
 LABEL org.opencontainers.image.licenses="GPL-3.0-or-later"
-LABEL org.opencontainers.image.version="1.3.0"
+LABEL org.opencontainers.image.version="1.2.2"

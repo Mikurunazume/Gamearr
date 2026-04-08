@@ -5,21 +5,14 @@ import { Download, Info, Star, Calendar, Eye, EyeOff, Loader2 } from "lucide-rea
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import StatusBadge, { type GameStatus } from "./StatusBadge";
-import { type Game, type DownloadSummary } from "@shared/schema";
-import DownloadIndicator from "./DownloadIndicator";
-import SearchResultsBadge from "./SearchResultsBadge";
-import { useState, memo, useRef, useEffect, lazy, Suspense } from "react";
+import { type Game } from "@shared/schema";
+import { useState, memo, useRef, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { mapGameToInsertGame, isDiscoveryId, getNextStatusLabel } from "@/lib/utils";
+import GameDetailsModal from "./GameDetailsModal";
+import GameDownloadDialog from "./GameDownloadDialog";
+import { mapGameToInsertGame, isDiscoveryId } from "@/lib/utils";
 import { apiRequest, ApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import LazyModalFallback from "./LazyModalFallback";
-import { getReleaseStatus } from "@/lib/game-utils";
-
-// ⚡ Bolt: Lazy load heavy modal components to reduce initial bundle size.
-// These are only needed when the user interacts with the card.
-const GameDetailsModal = lazy(() => import("./GameDetailsModal"));
-const GameDownloadDialog = lazy(() => import("./GameDownloadDialog"));
 
 interface GameCardProps {
   game: Game;
@@ -28,7 +21,32 @@ interface GameCardProps {
   onTrackGame?: (game: Game) => void;
   onToggleHidden?: (gameId: string, hidden: boolean) => void;
   isDiscovery?: boolean;
-  downloadSummary?: DownloadSummary;
+}
+
+function getReleaseStatus(game: Game): {
+  label: string;
+  variant: "default" | "secondary" | "outline" | "destructive";
+  isReleased: boolean;
+  className?: string;
+} {
+  if (game.releaseStatus === "delayed") {
+    return { label: "Delayed", variant: "destructive", isReleased: false };
+  }
+
+  if (!game.releaseDate) return { label: "TBA", variant: "secondary", isReleased: false };
+
+  const now = new Date();
+  const release = new Date(game.releaseDate);
+
+  if (release > now) {
+    return { label: "Upcoming", variant: "default", isReleased: false };
+  }
+  return {
+    label: "Released",
+    variant: "outline",
+    isReleased: true,
+    className: "bg-green-500 border-green-600 text-white",
+  };
 }
 
 // ⚡ Bolt: Using React.memo to prevent unnecessary re-renders of the GameCard
@@ -41,7 +59,6 @@ const GameCard = ({
   onTrackGame,
   onToggleHidden,
   isDiscovery = false,
-  downloadSummary,
 }: GameCardProps) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -127,13 +144,11 @@ const GameCard = ({
     onToggleHidden?.(game.id, !game.hidden);
   };
 
-  const nextStatusLabel = getNextStatusLabel(game.status);
-
   return (
     <Card
       ref={cardRef}
       onClick={handleDetailsClick}
-      className={`group hover-elevate transition-all duration-200 max-w-[225px] mx-auto w-full cursor-pointer flex flex-col h-full ${game.hidden ? "opacity-60 grayscale" : ""}`}
+      className={`group hover-elevate transition-all duration-200 max-w-[225px] mx-auto w-full cursor-pointer ${game.hidden ? "opacity-60 grayscale" : ""}`}
       data-testid={`card-game-${game.id}`}
     >
       <div className="relative">
@@ -146,12 +161,8 @@ const GameCard = ({
           loading="lazy"
           data-testid={`img-cover-${game.id}`}
         />
-        <DownloadIndicator summary={downloadSummary} />
         <div className="absolute top-2 right-2 flex flex-col gap-1">
           {!isDiscovery && game.status && <StatusBadge status={game.status} />}
-          {game.earlyAccess && (
-            <Badge className="text-xs bg-amber-500 border-amber-600 text-white">Early Access</Badge>
-          )}
           {game.status === "wanted" && (
             <Badge
               variant={releaseStatus.variant}
@@ -166,18 +177,17 @@ const GameCard = ({
             </Badge>
           )}
         </div>
-        <SearchResultsBadge visible={game.searchResultsAvailable ?? false} />
-        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 rounded-t-md flex items-center justify-center gap-2">
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 rounded-t-md flex items-center justify-center gap-2"
+        >
           {isDiscovery && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   size="icon"
                   variant="default"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleDownloadClick();
-                  }}
+                  onClick={handleDownloadClick}
                   disabled={addGameMutation.isPending}
                   aria-label={`Download ${game.title}`}
                   data-testid={`button-download-${game.id}`}
@@ -199,10 +209,7 @@ const GameCard = ({
               <Button
                 size="icon"
                 variant="secondary"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDetailsClick();
-                }}
+                onClick={handleDetailsClick}
                 aria-label={`View details for ${game.title}`}
                 data-testid={`button-details-${game.id}`}
               >
@@ -219,10 +226,7 @@ const GameCard = ({
                 <Button
                   size="icon"
                   variant="secondary"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleToggleHidden();
-                  }}
+                  onClick={handleToggleHidden}
                   aria-label={game.hidden ? `Unhide ${game.title}` : `Hide ${game.title}`}
                   data-testid={`button-toggle-hidden-${game.id}`}
                 >
@@ -236,7 +240,7 @@ const GameCard = ({
           )}
         </div>
       </div>
-      <CardContent className="p-3 flex flex-col flex-1" onClick={(e) => e.stopPropagation()}>
+      <CardContent className="p-3" onClick={(e) => e.stopPropagation()}>
         <h3
           className="font-semibold text-sm mb-2 line-clamp-2"
           data-testid={`text-title-${game.id}`}
@@ -269,7 +273,7 @@ const GameCard = ({
             </TooltipContent>
           </Tooltip>
         </div>
-        <div className="flex flex-wrap gap-1 mb-3 flex-1 content-start">
+        <div className="flex flex-wrap gap-1 mb-3">
           {game.genres?.slice(0, 2).map((genre) => (
             <span
               key={genre}
@@ -280,44 +284,36 @@ const GameCard = ({
             </span>
           )) || <span className="text-xs text-muted-foreground">No genres</span>}
         </div>
-        <div className="mt-auto">
-          {isDiscovery ? (
-            <Button
-              variant="default"
-              size="sm"
-              className="w-full"
-              onClick={() => onTrackGame?.(game)}
-              disabled={addGameMutation.isPending}
-              data-testid={`button-track-${game.id}`}
-              aria-label={`Track ${game.title}`}
-            >
-              {addGameMutation.isPending ? (
-                <>
-                  <Loader2 className="h-3 w-3 mr-2 animate-spin" />
-                  Tracking...
-                </>
-              ) : (
-                "Track Game"
-              )}
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full"
-              onClick={handleStatusClick}
-              data-testid={`button-status-${game.id}`}
-              aria-label={`Mark ${game.title} as ${nextStatusLabel}`}
-            >
-              Mark as{" "}
-              {game.status === "wanted"
-                ? "Owned"
-                : game.status === "owned"
-                  ? "Completed"
-                  : "Wanted"}
-            </Button>
-          )}
-        </div>
+        {isDiscovery ? (
+          <Button
+            variant="default"
+            size="sm"
+            className="w-full"
+            onClick={() => onTrackGame?.(game)}
+            disabled={addGameMutation.isPending}
+            data-testid={`button-track-${game.id}`}
+          >
+            {addGameMutation.isPending ? (
+              <>
+                <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                Tracking...
+              </>
+            ) : (
+              "Track Game"
+            )}
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={handleStatusClick}
+            data-testid={`button-status-${game.id}`}
+          >
+            Mark as{" "}
+            {game.status === "wanted" ? "Owned" : game.status === "owned" ? "Completed" : "Wanted"}
+          </Button>
+        )}
       </CardContent>
 
       {/* ⚡ Bolt: Conditionally render modals only when they are active.
@@ -325,19 +321,15 @@ const GameCard = ({
           with many game cards, significantly improving initial render performance
           and reducing memory usage. */}
       {detailsOpen && (
-        <Suspense fallback={<LazyModalFallback message="Loading game details..." />}>
-          <GameDetailsModal game={resolvedGame} open={detailsOpen} onOpenChange={setDetailsOpen} />
-        </Suspense>
+        <GameDetailsModal game={resolvedGame} open={detailsOpen} onOpenChange={setDetailsOpen} />
       )}
 
       {downloadOpen && (
-        <Suspense fallback={<LazyModalFallback message="Loading download dialog..." />}>
-          <GameDownloadDialog
-            game={resolvedGame}
-            open={downloadOpen}
-            onOpenChange={setDownloadOpen}
-          />
-        </Suspense>
+        <GameDownloadDialog
+          game={resolvedGame}
+          open={downloadOpen}
+          onOpenChange={setDownloadOpen}
+        />
       )}
     </Card>
   );
