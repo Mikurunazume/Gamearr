@@ -251,8 +251,12 @@ function YearView({
 }) {
   const year = currentDate.getFullYear();
   const months = Array.from({ length: 12 }, (_, i) => i);
-  // ⚡ Bolt: Pre-calculate the entries array once instead of 12 times
-  const gamesEntries = Object.entries(gamesByDate);
+  // ⚡ Bolt: Pre-calculate and parse Date objects once instead of inside the 12-month loop, wrapped in useMemo
+  const parsedGamesEntries = useMemo(() => {
+    return Object.entries(gamesByDate).map(
+      ([dateStr, games]) => ({ dateStr, dateObj: new Date(dateStr), games })
+    );
+  }, [gamesByDate]);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -260,12 +264,11 @@ function YearView({
         const monthStart = new Date(year, month, 1);
         const monthEnd = new Date(year, month + 1, 0);
 
-        // ⚡ Bolt: Parse dates once from the pre-calculated entries array
-        const gamesInMonth = gamesEntries.filter(([date]) => {
-          const d = new Date(date);
-          return d >= monthStart && d <= monthEnd;
-        });
-        const gameCount = gamesInMonth.reduce((sum, [, games]) => sum + games.length, 0);
+        // ⚡ Bolt: Filter using pre-parsed dates instead of instantiating new Dates repeatedly
+        const gamesInMonth = parsedGamesEntries.filter(
+          ({ dateObj }) => dateObj >= monthStart && dateObj <= monthEnd
+        );
+        const gameCount = gamesInMonth.reduce((sum, { games }) => sum + games.length, 0);
 
         return (
           <div key={month} className="bg-card border rounded-lg p-4">
@@ -279,10 +282,10 @@ function YearView({
             </div>
             <div className="space-y-2">
               {gamesInMonth.length > 0 ? (
-                gamesInMonth.map(([date, games]) => (
-                  <div key={date} className="text-sm">
+                gamesInMonth.map(({ dateStr, dateObj, games }) => (
+                  <div key={dateStr} className="text-sm">
                     <div className="text-muted-foreground mb-1">
-                      {new Date(date).toLocaleDateString("en-US", {
+                      {dateObj.toLocaleDateString("en-US", {
                         month: "short",
                         day: "numeric",
                       })}
