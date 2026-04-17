@@ -1,0 +1,69 @@
+name: Gamearr - Publish Docker image to GHCR
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Override image tag (optional, e.g. 1.3.0-gamearr.1)"
+        required: false
+        default: ""
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+      - "v*.*.*-gamearr.*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    name: Build and push ghcr.io/mikurunazume/gamearr
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/mikurunazume/gamearr
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+          labels: |
+            org.opencontainers.image.title=Gamearr
+            org.opencontainers.image.description=A true *arr for PC games (fork of Questarr)
+            org.opencontainers.image.source=https://github.com/Mikurunazume/Gamearr
+            org.opencontainers.image.licenses=GPL-3.0-only
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=gamearr
+          cache-to: type=gha,mode=max,scope=gamearr
+          provenance: false
