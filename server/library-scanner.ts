@@ -15,10 +15,10 @@
 
 import fs from "fs";
 import path from "path";
-import { randomUUID } from "crypto";
 import { storage } from "./storage.js";
 import { igdbClient, type IGDBGame } from "./igdb.js";
 import { normalizeTitle, cleanReleaseName } from "../shared/title-utils.js";
+import { parseGameVaultFilename } from "../shared/gamevault-naming.js";
 import { igdbLogger, routesLogger } from "./logger.js";
 import { notifyUser } from "./socket.js";
 import type { InsertGame, InsertGameFile } from "../shared/schema.js";
@@ -234,8 +234,14 @@ async function bestIgdbMatch(folderName: string): Promise<{
   cleaned: string;
   score: number;
 }> {
-  const cleaned = cleanReleaseName(folderName);
+  // Prefer the GameVault parser for titles that follow the spec; fall back
+  // to the generic cleanReleaseName for scene-style or arbitrary names.
+  const gv = parseGameVaultFilename(folderName);
+  const cleanedFromGv = gv.title && gv.title.trim().length > 0 ? gv.title.trim() : "";
+  const cleaned = cleanedFromGv || cleanReleaseName(folderName);
   const query = cleaned || folderName;
+  const expectedYear = gv.releaseYear;
+
   let candidates: IGDBGame[] = [];
   try {
     candidates = await igdbClient.searchGames(query, 5);
@@ -248,11 +254,23 @@ async function bestIgdbMatch(folderName: string): Promise<{
     return { best: null, candidates: [], cleaned, score: 0 };
   }
 
-  // Pick the candidate with the highest score. Ties broken by IGDB ranking order.
+  // Score with an optional year-bonus when the filename carries a release year
+  // and the IGDB candidate's year matches (±1). This kills ambiguity between
+  // remakes/sequels (e.g. "Alien Isolation 2014" vs hypothetical 2023 remake).
+  function scoreWithYear(c: IGDBGame): number {
+    const base = scoreMatch(cleaned, c.name);
+    if (expectedYear === null || !c.first_release_date) return base;
+    const y = new Date(c.first_release_date * 1000).getUTCFullYear();
+    const delta = Math.abs(y - expectedYear);
+    if (delta <= 1) return Math.min(1, base + 0.15);
+    if (delta >= 3) return Math.max(0, base - 0.1);
+    return base;
+  }
+
   let best = candidates[0];
-  let bestScore = scoreMatch(cleaned, best.name);
+  let bestScore = scoreWithYear(best);
   for (let i = 1; i < candidates.length; i += 1) {
-    const s = scoreMatch(cleaned, candidates[i].name);
+    const s = scoreWithYear(candidates[i]);
     if (s > bestScore) {
       best = candidates[i];
       bestScore = s;
