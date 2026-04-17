@@ -85,6 +85,24 @@ export const indexers = sqliteTable("indexers", {
   ),
 });
 
+// Gamearr: library root folders (e.g. /mnt/GAMES, /mnt/GAMES/GOG)
+export const rootFolders = sqliteTable("root_folders", {
+  id: text("id").primaryKey(),
+  path: text("path").notNull().unique(),
+  label: text("label").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  accessible: integer("accessible", { mode: "boolean" }).notNull().default(false),
+  diskFreeBytes: integer("disk_free_bytes"),
+  diskTotalBytes: integer("disk_total_bytes"),
+  lastHealthCheck: integer("last_health_check", { mode: "timestamp_ms" }),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).default(
+    sql`(strftime('%s', 'now') * 1000)`
+  ),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).default(
+    sql`(strftime('%s', 'now') * 1000)`
+  ),
+});
+
 export const downloaders = sqliteTable("downloaders", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -203,6 +221,29 @@ export const insertDownloaderSchema = createInsertSchema(downloaders).omit({
   updatedAt: true,
 });
 
+// Gamearr: root folders Zod schemas
+export const insertRootFolderSchema = createInsertSchema(rootFolders).omit({
+  id: true,
+  accessible: true,
+  diskFreeBytes: true,
+  diskTotalBytes: true,
+  lastHealthCheck: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updateRootFolderSchema = createInsertSchema(rootFolders)
+  .omit({
+    id: true,
+    accessible: true,
+    diskFreeBytes: true,
+    diskTotalBytes: true,
+    lastHealthCheck: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .partial();
+
 export const insertGameDownloadSchema = createInsertSchema(gameDownloads).omit({
   id: true,
   addedAt: true,
@@ -279,6 +320,11 @@ export type InsertIndexer = (typeof insertIndexerSchema)["_output"];
 
 export type Downloader = typeof downloaders.$inferSelect;
 export type InsertDownloader = (typeof insertDownloaderSchema)["_output"];
+
+// Gamearr: root folders types
+export type RootFolder = typeof rootFolders.$inferSelect;
+export type InsertRootFolder = (typeof insertRootFolderSchema)["_output"];
+export type UpdateRootFolder = (typeof updateRootFolderSchema)["_output"];
 
 export type GameDownload = typeof gameDownloads.$inferSelect;
 export type InsertGameDownload = (typeof insertGameDownloadSchema)["_output"];

@@ -410,6 +410,52 @@ export const sanitizeDownloaderDownloadData = [
     .withMessage("Invalid game ID format"),
 ];
 
+// Gamearr: sanitization rules for root folder create/update
+// Path must be absolute, max 500 chars, no `..` (traversal guard),
+// label is a friendly name shown in the UI.
+const rootFolderPathValidator = body("path")
+  .trim()
+  .isLength({ min: 1, max: 500 })
+  .withMessage("Path must be between 1 and 500 characters")
+  .custom((value: string) => {
+    if (value.includes("..")) return false;
+    // Absolute path: POSIX (/foo) or Windows (C:\foo, C:/foo, \\server\share)
+    const isPosixAbs = value.startsWith("/");
+    const isWinAbs = /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith("\\\\");
+    return isPosixAbs || isWinAbs;
+  })
+  .withMessage("Path must be absolute and must not contain '..'");
+
+export const sanitizeRootFolderData = [
+  rootFolderPathValidator,
+  body("label")
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage("Label must be between 1 and 100 characters"),
+  body("enabled").optional().isBoolean().withMessage("Enabled must be a boolean").toBoolean(),
+];
+
+export const sanitizeRootFolderUpdateData = [
+  body("path")
+    .optional()
+    .trim()
+    .isLength({ min: 1, max: 500 })
+    .withMessage("Path must be between 1 and 500 characters")
+    .custom((value: string) => {
+      if (value.includes("..")) return false;
+      const isPosixAbs = value.startsWith("/");
+      const isWinAbs = /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith("\\\\");
+      return isPosixAbs || isWinAbs;
+    })
+    .withMessage("Path must be absolute and must not contain '..'"),
+  body("label")
+    .optional()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage("Label must be between 1 and 100 characters"),
+  body("enabled").optional().isBoolean().withMessage("Enabled must be a boolean").toBoolean(),
+];
+
 // Sanitization rules for indexer search queries
 export const sanitizeIndexerSearchQuery = [
   query("query")
