@@ -1,3 +1,7 @@
+> **⚙️ Gamearr** — this is a fork of [Doezer/Questarr](https://github.com/Doezer/Questarr) extended with Sonarr/Radarr-grade features: library scanning, import pipeline with rename, root folders, naming templates, and quality profiles. See [GAMEARR.md](./GAMEARR.md) for the fork roadmap. The rest of this README documents the upstream Questarr features, which remain available as-is.
+
+---
+
 <div align="center">
   <img src="images/Questarr_Logo-nobg.png" alt="Questarr Logo" width="400">
 

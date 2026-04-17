@@ -1,13 +1,13 @@
 {
-  "name": "questarr",
-  "version": "1.2.2",
-  "description": "A video game management application inspired by the -Arr apps. Track and organize your video game collection with automated discovery and download management.",
+  "name": "gamearr",
+  "version": "1.2.2-gamearr.0",
+  "description": "Gamearr — a true *arr for PC games. Fork of Questarr extended with library scanning, import pipeline, root folders, naming templates and quality profiles.",
   "type": "module",
   "packageManager": "npm@11.7.0",
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Doezer/Questarr.git"
+    "url": "https://github.com/Mikurunazume/Gamearr.git"
   },
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx server/index.ts",
