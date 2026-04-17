@@ -1661,6 +1661,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
   );
 
   // ==========================================================================
+  // Gamearr: Library scanner
+  // Scans configured root folders, matches IGDB, populates games + game_files.
+  // ==========================================================================
+
+  app.post("/api/library/scan", sensitiveEndpointLimiter, async (req: Request, res: Response) => {
+    try {
+      const { rootFolderId } = req.body ?? {};
+      const { scanRootFolderById, scanAllEnabledRootFolders } =
+        await import("./library-scanner.js");
+      if (rootFolderId) {
+        const folder = await storage.getRootFolder(rootFolderId);
+        if (!folder) return res.status(404).json({ error: "Root folder not found" });
+        // Fire-and-forget; progress is available via GET /api/library/scan/status
+        scanRootFolderById(rootFolderId).catch((err) =>
+          routesLogger.error({ err }, "scanRootFolderById crashed")
+        );
+        return res.status(202).json({ accepted: true, rootFolderId });
+      }
+      scanAllEnabledRootFolders().catch((err) =>
+        routesLogger.error({ err }, "scanAllEnabledRootFolders crashed")
+      );
+      res.status(202).json({ accepted: true, rootFolderId: null });
+    } catch (error) {
+      routesLogger.error({ error }, "error starting library scan");
+      res.status(500).json({ error: "Failed to start library scan" });
+    }
+  });
+
+  app.get("/api/library/scan/status", async (_req: Request, res: Response) => {
+    try {
+      const { getAllScanProgress } = await import("./library-scanner.js");
+      res.json(getAllScanProgress());
+    } catch (error) {
+      routesLogger.error({ error }, "error reading scan status");
+      res.status(500).json({ error: "Failed to read scan status" });
+    }
+  });
+
+  app.get("/api/library/scan/unmatched", async (_req: Request, res: Response) => {
+    try {
+      const { getAllUnmatched } = await import("./library-scanner.js");
+      res.json(getAllUnmatched());
+    } catch (error) {
+      routesLogger.error({ error }, "error reading unmatched list");
+      res.status(500).json({ error: "Failed to read unmatched list" });
+    }
+  });
+
+  app.post(
+    "/api/library/scan/unmatched/match",
+    sensitiveEndpointLimiter,
+    async (req: Request, res: Response) => {
+      try {
+        const { rootFolderId, folderName, igdbId } = req.body ?? {};
+        if (!rootFolderId || !folderName || typeof igdbId !== "number") {
+          return res.status(400).json({ error: "rootFolderId, folderName, igdbId are required" });
+        }
+        const { matchUnmatchedFolder } = await import("./library-scanner.js");
+        const result = await matchUnmatchedFolder(rootFolderId, folderName, igdbId);
+        res.json(result);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : "Unknown error";
+        routesLogger.error({ error }, "error resolving unmatched folder");
+        res.status(500).json({ error: msg });
+      }
+    }
+  );
+
+  // ==========================================================================
   // Gamearr: Game files
   // On-disk files tracked per game (populated by the scanner & import pipeline).
   // ==========================================================================
