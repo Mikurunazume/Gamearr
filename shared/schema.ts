@@ -103,6 +103,29 @@ export const rootFolders = sqliteTable("root_folders", {
   ),
 });
 
+// Gamearr: on-disk files tracked per game. Populated by the library scanner (#3)
+// and the import pipeline (#4). `relativePath` is relative to `rootFolderId.path`,
+// so files remain portable if a root folder is relocated.
+export const gameFiles = sqliteTable("game_files", {
+  id: text("id").primaryKey(),
+  gameId: text("game_id")
+    .notNull()
+    .references(() => games.id, { onDelete: "cascade" }),
+  rootFolderId: text("root_folder_id").references(() => rootFolders.id, {
+    onDelete: "set null",
+  }),
+  relativePath: text("relative_path").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  fileType: text("file_type").notNull().default("other"), // installer | iso | archive | other
+  checksumSha1: text("checksum_sha1"),
+  lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).default(
+    sql`(strftime('%s', 'now') * 1000)`
+  ),
+  addedAt: integer("added_at", { mode: "timestamp_ms" }).default(
+    sql`(strftime('%s', 'now') * 1000)`
+  ),
+});
+
 export const downloaders = sqliteTable("downloaders", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -221,6 +244,21 @@ export const insertDownloaderSchema = createInsertSchema(downloaders).omit({
   updatedAt: true,
 });
 
+// Gamearr: game_files Zod schemas
+export const insertGameFileSchema = createInsertSchema(gameFiles).omit({
+  id: true,
+  lastSeenAt: true,
+  addedAt: true,
+});
+
+export const updateGameFileSchema = createInsertSchema(gameFiles)
+  .omit({
+    id: true,
+    gameId: true,
+    addedAt: true,
+  })
+  .partial();
+
 // Gamearr: root folders Zod schemas
 export const insertRootFolderSchema = createInsertSchema(rootFolders).omit({
   id: true,
@@ -325,6 +363,11 @@ export type InsertDownloader = (typeof insertDownloaderSchema)["_output"];
 export type RootFolder = typeof rootFolders.$inferSelect;
 export type InsertRootFolder = (typeof insertRootFolderSchema)["_output"];
 export type UpdateRootFolder = (typeof updateRootFolderSchema)["_output"];
+
+// Gamearr: game_files types
+export type GameFile = typeof gameFiles.$inferSelect;
+export type InsertGameFile = (typeof insertGameFileSchema)["_output"];
+export type UpdateGameFile = (typeof updateGameFileSchema)["_output"];
 
 export type GameDownload = typeof gameDownloads.$inferSelect;
 export type InsertGameDownload = (typeof insertGameDownloadSchema)["_output"];

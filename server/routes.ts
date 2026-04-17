@@ -1660,6 +1660,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
+  // ==========================================================================
+  // Gamearr: Game files
+  // On-disk files tracked per game (populated by the scanner & import pipeline).
+  // ==========================================================================
+
+  app.get("/api/games/:id/files", async (req: Request, res: Response) => {
+    try {
+      const game = await storage.getGame(req.params.id);
+      if (!game) return res.status(404).json({ error: "Game not found" });
+      const files = await storage.getGameFiles(req.params.id);
+      res.json(files);
+    } catch (error) {
+      routesLogger.error({ error }, "error listing game files");
+      res.status(500).json({ error: "Failed to list game files" });
+    }
+  });
+
+  app.delete(
+    "/api/game-files/:id",
+    sensitiveEndpointLimiter,
+    async (req: Request, res: Response) => {
+      try {
+        const deleteOnDisk = req.query.deleteOnDisk === "true";
+        const file = await storage.getGameFile(req.params.id);
+        if (!file) return res.status(404).json({ error: "Game file not found" });
+
+        if (deleteOnDisk) {
+          if (!file.rootFolderId) {
+            return res.status(400).json({
+              error: "Cannot delete from disk: the file's root folder was removed",
+            });
+          }
+          const rootFolder = await storage.getRootFolder(file.rootFolderId);
+          if (!rootFolder) {
+            return res.status(400).json({ error: "Root folder no longer exists" });
+          }
+          const fsModule = await import("fs");
+          const pathModule = await import("path");
+          const absolute = pathModule.resolve(rootFolder.path, file.relativePath);
+          // Path containment guard: never delete outside the configured root folder
+          const rootResolved = pathModule.resolve(rootFolder.path);
+          const relativeCheck = pathModule.relative(rootResolved, absolute);
+          if (relativeCheck.startsWith("..") || pathModule.isAbsolute(relativeCheck)) {
+            return res
+              .status(400)
+              .json({ error: "Refusing to delete file outside its root folder" });
+          }
+          try {
+            await fsModule.promises.rm(absolute, { force: true });
+          } catch (err) {
+            routesLogger.warn(
+              { err, absolute },
+              "on-disk delete failed, tracking row will still be removed"
+            );
+          }
+        }
+
+        await storage.removeGameFile(req.params.id);
+        res.status(204).send();
+      } catch (error) {
+        routesLogger.error({ error }, "error deleting game file");
+        res.status(500).json({ error: "Failed to delete game file" });
+      }
+    }
+  );
+
   // Torznab search routes
 
   // Search for games using configured indexers (alias for /api/indexers/search)
