@@ -11,6 +11,9 @@ import {
   type RootFolder,
   type InsertRootFolder,
   type UpdateRootFolder,
+  type GameFile,
+  type InsertGameFile,
+  type UpdateGameFile,
   type GameDownload,
   type InsertGameDownload,
   type Notification,
@@ -29,6 +32,7 @@ import {
   indexers,
   downloaders,
   rootFolders,
+  gameFiles,
   notifications,
   gameDownloads,
   userSettings,
@@ -103,6 +107,15 @@ export interface IStorage {
   ): Promise<RootFolder | undefined>;
   removeRootFolder(id: string): Promise<boolean>;
 
+  // GameFile methods (Gamearr)
+  getGameFiles(gameId: string): Promise<GameFile[]>;
+  getGameFile(id: string): Promise<GameFile | undefined>;
+  getGameFilesByRootFolder(rootFolderId: string): Promise<GameFile[]>;
+  addGameFile(file: InsertGameFile): Promise<GameFile>;
+  updateGameFile(id: string, updates: UpdateGameFile): Promise<GameFile | undefined>;
+  touchGameFile(id: string): Promise<GameFile | undefined>;
+  removeGameFile(id: string): Promise<boolean>;
+
   // GameDownload methods
   getDownloadingGameDownloads(): Promise<GameDownload[]>;
   updateGameDownloadStatus(id: string, status: string): Promise<void>;
@@ -158,6 +171,7 @@ export class MemStorage implements IStorage {
   private rssFeeds: Map<string, RssFeed>;
   private rssFeedItems: Map<string, RssFeedItem>;
   private rootFolders: Map<string, RootFolder> = new Map();
+  private gameFiles: Map<string, GameFile> = new Map();
 
   constructor() {
     this.users = new Map();
@@ -636,6 +650,58 @@ export class MemStorage implements IStorage {
 
   async removeRootFolder(id: string): Promise<boolean> {
     return this.rootFolders.delete(id);
+  }
+
+  // GameFile methods (Gamearr)
+  async getGameFiles(gameId: string): Promise<GameFile[]> {
+    return Array.from(this.gameFiles.values())
+      .filter((f) => f.gameId === gameId)
+      .sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  }
+
+  async getGameFile(id: string): Promise<GameFile | undefined> {
+    return this.gameFiles.get(id);
+  }
+
+  async getGameFilesByRootFolder(rootFolderId: string): Promise<GameFile[]> {
+    return Array.from(this.gameFiles.values()).filter((f) => f.rootFolderId === rootFolderId);
+  }
+
+  async addGameFile(insert: InsertGameFile): Promise<GameFile> {
+    const id = randomUUID();
+    const file: GameFile = {
+      id,
+      gameId: insert.gameId,
+      rootFolderId: insert.rootFolderId ?? null,
+      relativePath: insert.relativePath,
+      sizeBytes: insert.sizeBytes,
+      fileType: insert.fileType ?? "other",
+      checksumSha1: insert.checksumSha1 ?? null,
+      lastSeenAt: new Date(),
+      addedAt: new Date(),
+    };
+    this.gameFiles.set(id, file);
+    return file;
+  }
+
+  async updateGameFile(id: string, updates: UpdateGameFile): Promise<GameFile | undefined> {
+    const file = this.gameFiles.get(id);
+    if (!file) return undefined;
+    const updated: GameFile = { ...file, ...updates };
+    this.gameFiles.set(id, updated);
+    return updated;
+  }
+
+  async touchGameFile(id: string): Promise<GameFile | undefined> {
+    const file = this.gameFiles.get(id);
+    if (!file) return undefined;
+    const updated: GameFile = { ...file, lastSeenAt: new Date() };
+    this.gameFiles.set(id, updated);
+    return updated;
+  }
+
+  async removeGameFile(id: string): Promise<boolean> {
+    return this.gameFiles.delete(id);
   }
 
   // GameDownload methods
@@ -1349,6 +1415,56 @@ export class DatabaseStorage implements IStorage {
 
   async removeRootFolder(id: string): Promise<boolean> {
     await db.delete(rootFolders).where(eq(rootFolders.id, id));
+    return true;
+  }
+
+  // GameFile methods (Gamearr)
+  async getGameFiles(gameId: string): Promise<GameFile[]> {
+    return db
+      .select()
+      .from(gameFiles)
+      .where(eq(gameFiles.gameId, gameId))
+      .orderBy(gameFiles.relativePath);
+  }
+
+  async getGameFile(id: string): Promise<GameFile | undefined> {
+    const [file] = await db.select().from(gameFiles).where(eq(gameFiles.id, id));
+    return file || undefined;
+  }
+
+  async getGameFilesByRootFolder(rootFolderId: string): Promise<GameFile[]> {
+    return db.select().from(gameFiles).where(eq(gameFiles.rootFolderId, rootFolderId));
+  }
+
+  async addGameFile(insert: InsertGameFile): Promise<GameFile> {
+    const id = randomUUID();
+    const [file] = await db
+      .insert(gameFiles)
+      .values({ ...insert, id })
+      .returning();
+    return file;
+  }
+
+  async updateGameFile(id: string, updates: UpdateGameFile): Promise<GameFile | undefined> {
+    const [updated] = await db
+      .update(gameFiles)
+      .set(updates)
+      .where(eq(gameFiles.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async touchGameFile(id: string): Promise<GameFile | undefined> {
+    const [updated] = await db
+      .update(gameFiles)
+      .set({ lastSeenAt: new Date() })
+      .where(eq(gameFiles.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async removeGameFile(id: string): Promise<boolean> {
+    await db.delete(gameFiles).where(eq(gameFiles.id, id));
     return true;
   }
 

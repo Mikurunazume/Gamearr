@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -11,11 +11,74 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Calendar, Star, Monitor, Gamepad2, Tag, Download, X } from "lucide-react";
+import { Calendar, Star, Monitor, Gamepad2, Tag, Download, X, FileBox } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { type Game } from "@shared/schema";
+import { type Game, type GameFile } from "@shared/schema";
 import StatusBadge from "./StatusBadge";
 import GameDownloadDialog from "./GameDownloadDialog";
+
+function formatSize(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+function GameFilesSection({ gameId }: { gameId: string }) {
+  const { data: files = [], isLoading } = useQuery<GameFile[]>({
+    queryKey: [`/api/games/${gameId}/files`],
+  });
+
+  if (isLoading || files.length === 0) return null;
+
+  // Files not seen in the last 24h are flagged as "missing" hint
+  const STALE_MS = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+
+  return (
+    <div>
+      <h3 className="font-semibold mb-3 flex items-center gap-2">
+        <FileBox className="h-4 w-4" />
+        Files on disk ({files.length})
+      </h3>
+      <div className="space-y-2">
+        {files.map((f) => {
+          const stale = f.lastSeenAt && now - new Date(f.lastSeenAt).getTime() > STALE_MS;
+          return (
+            <div
+              key={f.id}
+              className="flex items-center justify-between gap-3 rounded-md border p-2 text-sm"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="font-mono text-xs truncate" title={f.relativePath}>
+                  {f.relativePath}
+                </p>
+                <div className="flex gap-2 mt-1">
+                  <Badge variant="outline" className="text-[10px]">
+                    {f.fileType}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">{formatSize(f.sizeBytes)}</span>
+                  {stale && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] text-yellow-500 border-yellow-500/40"
+                    >
+                      Missing since last scan
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 interface GameDetailsModalProps {
   game: Game | null;
@@ -241,6 +304,9 @@ export default function GameDetailsModal({ game, open, onOpenChange }: GameDetai
                   </div>
                 )}
               </div>
+
+              {/* Gamearr: files on disk */}
+              <GameFilesSection gameId={game.id} />
 
               {/* Screenshots */}
               {game.screenshots && game.screenshots.length > 0 && (
