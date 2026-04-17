@@ -49,8 +49,16 @@ export interface UnmatchedEntry {
 }
 
 interface FolderCandidate {
+  // Name used both as display & IGDB query; for standalone files this is
+  // the basename with the extension stripped.
   folderName: string;
+  // Absolute path of the candidate itself (either a directory or a file).
   absolutePath: string;
+  // When the candidate is a single file (e.g. `/games/Witcher 3.iso`), the
+  // scanner treats the file itself as "the game" rather than recursing.
+  isFile?: boolean;
+  // Pre-computed size for standalone files so we don't stat twice.
+  fileSize?: number;
 }
 
 // ---------- File type detection ----------
@@ -126,9 +134,34 @@ function emitProgress(p: ScanProgress) {
 
 async function listCandidates(rootPath: string): Promise<FolderCandidate[]> {
   const entries = await fs.promises.readdir(rootPath, { withFileTypes: true });
-  return entries
-    .filter((e) => e.isDirectory() && !e.name.startsWith("."))
-    .map((e) => ({ folderName: e.name, absolutePath: path.join(rootPath, e.name) }));
+  const candidates: FolderCandidate[] = [];
+  for (const e of entries) {
+    if (e.name.startsWith(".")) continue;
+    const abs = path.join(rootPath, e.name);
+    if (e.isDirectory()) {
+      candidates.push({ folderName: e.name, absolutePath: abs });
+    } else if (e.isFile()) {
+      // Standalone game file (GameVault-style flat library). Treat it as
+      // a single-file game candidate, using the basename without extension
+      // as the IGDB query string.
+      const fileType = classifyFile(e.name);
+      if (fileType === "ignore" || fileType === "other") continue;
+      let size = 0;
+      try {
+        const stat = await fs.promises.stat(abs);
+        size = stat.size;
+      } catch {
+        continue; // Unreadable
+      }
+      candidates.push({
+        folderName: path.parse(e.name).name,
+        absolutePath: abs,
+        isFile: true,
+        fileSize: size,
+      });
+    }
+  }
+  return candidates;
 }
 
 async function listFiles(
@@ -310,9 +343,34 @@ export async function matchUnmatchedFolder(
   const rootFolder = await storage.getRootFolder(rootFolderId);
   if (!rootFolder) throw new Error("Root folder not found");
 
-  const absolutePath = path.join(rootFolder.path, folderName);
-  const stat = await fs.promises.stat(absolutePath);
-  if (!stat.isDirectory()) throw new Error("Folder does not exist");
+  // The `folderName` from the unmatched list might be a directory name OR
+  // the basename (without ext) of a standalone file. Resolve both cases.
+  const direct = path.join(rootFolder.path, folderName);
+  let absolutePath = direct;
+  let isFile = false;
+  let standaloneSize = 0;
+
+  try {
+    const stat = await fs.promises.stat(direct);
+    if (stat.isDirectory()) {
+      isFile = false;
+    } else if (stat.isFile()) {
+      isFile = true;
+      standaloneSize = stat.size;
+    } else {
+      throw new Error("Path is neither a directory nor a file");
+    }
+  } catch {
+    // Maybe it's a standalone file with an extension — find a file whose
+    // basename (no ext) matches folderName.
+    const siblings = await fs.promises.readdir(rootFolder.path, { withFileTypes: true });
+    const match = siblings.find((e) => e.isFile() && path.parse(e.name).name === folderName);
+    if (!match) throw new Error("Folder or file does not exist");
+    absolutePath = path.join(rootFolder.path, match.name);
+    const stat = await fs.promises.stat(absolutePath);
+    isFile = true;
+    standaloneSize = stat.size;
+  }
 
   // Fetch IGDB entry
   const candidates = await igdbClient.searchGames(folderName, 10);
@@ -326,7 +384,9 @@ export async function matchUnmatchedFolder(
     await storage.updateGameStatus(game.id, { status: "owned" });
   }
 
-  const files = await listFiles(absolutePath);
+  const files = isFile
+    ? [{ relativeTo: absolutePath, size: standaloneSize }]
+    : await listFiles(absolutePath);
   const filesAdded = await assignFilesToGame(
     game.id,
     rootFolder.id,
@@ -375,7 +435,12 @@ export async function scanRootFolderById(rootFolderId: string): Promise<void> {
       progress.currentCandidate = cand.folderName;
       emitProgress(progress);
       try {
-        const files = await listFiles(cand.absolutePath);
+        // Collect the files that belong to this candidate. For standalone
+        // files (GameVault-style flat layout), the file itself is the only
+        // asset. For directories, we recurse via listFiles.
+        const files = cand.isFile
+          ? [{ relativeTo: cand.absolutePath, size: cand.fileSize ?? 0 }]
+          : await listFiles(cand.absolutePath);
         // Skip folders with no usable files (all ignored)
         const usable = files.filter((f) => classifyFile(f.relativeTo) !== "ignore");
         if (usable.length === 0) {
