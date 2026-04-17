@@ -17,11 +17,6 @@ jobs:
         node-version: [20.x]
     
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
-        with:
-          egress-policy: audit
-
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.2.0
       
@@ -81,11 +76,6 @@ jobs:
     needs: build
     
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
-        with:
-          egress-policy: audit
-
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.2.0
       
@@ -98,20 +88,20 @@ jobs:
           done
 
       - name: Set up Docker Buildx
-        uses: step-security/setup-buildx-action@f931205d68723ad9589fd2a7e2ece238bf9de341 # v4.0.0
-      
+        uses: docker/setup-buildx-action@v3
+
       - name: Build Docker image
-        uses: step-security/docker-build-push-action@a8c3d08b23f8be6aeed43eb1a14ce6fe51284438 # v6.18.0
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: false
-          tags: questarr:test
+          tags: gamearr:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
           load: true
-      
+
       - name: Verify Docker image
         run: |
           echo "Docker image built successfully"
-          docker images | grep questarr || echo "Image not found in docker images, but build completed"
+          docker images | grep gamearr || echo "Image not found in docker images, but build completed"
 
