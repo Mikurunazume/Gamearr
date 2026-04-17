@@ -10,6 +10,8 @@ import {
   updateGameHiddenSchema,
   insertIndexerSchema,
   insertDownloaderSchema,
+  insertRootFolderSchema,
+  updateRootFolderSchema,
   insertNotificationSchema,
   updateUserSettingsSchema,
   updatePasswordSchema,
@@ -39,6 +41,8 @@ import {
   sanitizeDownloaderData,
   sanitizeDownloaderUpdateData,
   sanitizeDownloaderDownloadData,
+  sanitizeRootFolderData,
+  sanitizeRootFolderUpdateData,
   sanitizeIndexerSearchQuery,
 } from "./middleware.js";
 import { config as appConfig } from "./config.js";
@@ -1515,6 +1519,146 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to delete downloader" });
     }
   });
+
+  // ==========================================================================
+  // Gamearr: Root folders
+  // Multi-path library roots used by the scanner and import pipeline.
+  // ==========================================================================
+
+  app.get("/api/root-folders", async (_req: Request, res: Response) => {
+    try {
+      const folders = await storage.getAllRootFolders();
+      res.json(folders);
+    } catch (error) {
+      routesLogger.error({ error }, "error listing root folders");
+      res.status(500).json({ error: "Failed to list root folders" });
+    }
+  });
+
+  app.get("/api/root-folders/:id", async (req: Request, res: Response) => {
+    try {
+      const folder = await storage.getRootFolder(req.params.id);
+      if (!folder) return res.status(404).json({ error: "Root folder not found" });
+      res.json(folder);
+    } catch (error) {
+      routesLogger.error({ error }, "error fetching root folder");
+      res.status(500).json({ error: "Failed to fetch root folder" });
+    }
+  });
+
+  app.post(
+    "/api/root-folders",
+    sensitiveEndpointLimiter,
+    sanitizeRootFolderData,
+    validateRequest,
+    async (req: Request, res: Response) => {
+      try {
+        const data = insertRootFolderSchema.parse(req.body);
+
+        // Uniqueness check (the DB has a UNIQUE index but surfacing a 409 is friendlier)
+        const existing = await storage.getRootFolderByPath(data.path);
+        if (existing) {
+          return res.status(409).json({ error: "A root folder with this path already exists" });
+        }
+
+        // Probe the path so the first response already contains health info
+        const { probeRootFolder } = await import("./root-folders.js");
+        const probe = await probeRootFolder(data.path);
+        if (!probe.accessible) {
+          return res.status(400).json({
+            error: "Path is not accessible",
+            details:
+              probe.error ??
+              "Path must exist, be a directory, and be writable by the server process",
+          });
+        }
+
+        const folder = await storage.addRootFolder(data);
+        const withHealth = await storage.updateRootFolderHealth(folder.id, {
+          accessible: probe.accessible,
+          diskFreeBytes: probe.diskFreeBytes,
+          diskTotalBytes: probe.diskTotalBytes,
+        });
+
+        res.status(201).json(withHealth ?? folder);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: "Invalid root folder data", details: error.errors });
+        }
+        routesLogger.error({ error }, "error creating root folder");
+        res.status(500).json({ error: "Failed to create root folder" });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/root-folders/:id",
+    sensitiveEndpointLimiter,
+    sanitizeRootFolderUpdateData,
+    validateRequest,
+    async (req: Request, res: Response) => {
+      try {
+        const updates = updateRootFolderSchema.parse(req.body);
+
+        // If path changes, verify uniqueness
+        if (updates.path) {
+          const clash = await storage.getRootFolderByPath(updates.path);
+          if (clash && clash.id !== req.params.id) {
+            return res.status(409).json({ error: "Another root folder already uses this path" });
+          }
+        }
+
+        const folder = await storage.updateRootFolder(req.params.id, updates);
+        if (!folder) return res.status(404).json({ error: "Root folder not found" });
+        res.json(folder);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: "Invalid root folder data", details: error.errors });
+        }
+        routesLogger.error({ error }, "error updating root folder");
+        res.status(500).json({ error: "Failed to update root folder" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/root-folders/:id",
+    sensitiveEndpointLimiter,
+    async (req: Request, res: Response) => {
+      try {
+        const success = await storage.removeRootFolder(req.params.id);
+        if (!success) return res.status(404).json({ error: "Root folder not found" });
+        res.status(204).send();
+      } catch (error) {
+        routesLogger.error({ error }, "error deleting root folder");
+        res.status(500).json({ error: "Failed to delete root folder" });
+      }
+    }
+  );
+
+  // Force-refresh health (accessibility + disk stats) for one root folder.
+  app.post(
+    "/api/root-folders/:id/health-check",
+    sensitiveEndpointLimiter,
+    async (req: Request, res: Response) => {
+      try {
+        const folder = await storage.getRootFolder(req.params.id);
+        if (!folder) return res.status(404).json({ error: "Root folder not found" });
+
+        const { probeRootFolder } = await import("./root-folders.js");
+        const probe = await probeRootFolder(folder.path);
+        const updated = await storage.updateRootFolderHealth(folder.id, {
+          accessible: probe.accessible,
+          diskFreeBytes: probe.diskFreeBytes,
+          diskTotalBytes: probe.diskTotalBytes,
+        });
+        res.json({ ...updated, error: probe.error ?? null });
+      } catch (error) {
+        routesLogger.error({ error }, "error running root folder health check");
+        res.status(500).json({ error: "Failed to run health check" });
+      }
+    }
+  );
 
   // Torznab search routes
 

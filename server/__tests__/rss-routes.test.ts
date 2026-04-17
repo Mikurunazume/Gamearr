@@ -74,6 +74,8 @@ vi.mock("../middleware.js", () => ({
   sanitizeDownloaderUpdateData: [],
   sanitizeDownloaderDownloadData: [],
   sanitizeIndexerSearchQuery: [],
+  sanitizeRootFolderData: [],
+  sanitizeRootFolderUpdateData: [],
 }));
 
 describe("RSS Routes", () => {

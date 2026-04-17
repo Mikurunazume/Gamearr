@@ -5,6 +5,7 @@ import { notifyUser } from "./socket.js";
 import { DownloaderManager } from "./downloaders.js";
 import { searchAllIndexers } from "./search.js";
 import { xrelClient, DEFAULT_XREL_BASE } from "./xrel.js";
+import { refreshAllRootFoldersHealth } from "./root-folders.js";
 
 import { downloadRulesSchema } from "../shared/schema.js";
 import { categorizeDownload } from "../shared/download-categorizer.js";
@@ -15,6 +16,7 @@ const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const DOWNLOAD_CHECK_INTERVAL_MS = 60 * 1000; // 1 minute
 const AUTO_SEARCH_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const XREL_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours (xREL search rate limit: 2/5s)
+const ROOT_FOLDERS_HEALTH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes (Gamearr)
 
 export function startCronJobs() {
   igdbLogger.info("Starting cron jobs...");
@@ -34,6 +36,9 @@ export function startCronJobs() {
     checkDownloadStatus().catch((err) => igdbLogger.error({ err }, "Error in checkDownloadStatus"));
     checkAutoSearch().catch((err) => igdbLogger.error({ err }, "Error in checkAutoSearch"));
     checkXrelReleases().catch((err) => igdbLogger.error({ err }, "Error in checkXrelReleases"));
+    refreshAllRootFoldersHealth().catch((err) =>
+      igdbLogger.error({ err }, "Error in refreshAllRootFoldersHealth")
+    );
   }, 10000);
 
   // Schedule periodic checks
@@ -52,6 +57,13 @@ export function startCronJobs() {
   setInterval(() => {
     checkXrelReleases().catch((err) => igdbLogger.error({ err }, "Error in checkXrelReleases"));
   }, XREL_CHECK_INTERVAL_MS);
+
+  // Gamearr: refresh disk stats + accessibility for every configured root folder
+  setInterval(() => {
+    refreshAllRootFoldersHealth().catch((err) =>
+      igdbLogger.error({ err }, "Error in refreshAllRootFoldersHealth")
+    );
+  }, ROOT_FOLDERS_HEALTH_INTERVAL_MS);
 }
 
 async function checkGameUpdates() {

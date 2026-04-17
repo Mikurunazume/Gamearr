@@ -12,6 +12,7 @@ import {
   User,
   Newspaper,
   Rss,
+  FolderTree,
 } from "lucide-react";
 import { useMemo } from "react";
 import {
@@ -89,6 +90,11 @@ const management = [
     title: "Downloaders",
     url: "/downloaders",
     icon: HardDrive,
+  },
+  {
+    title: "Root Folders",
+    url: "/root-folders",
+    icon: FolderTree,
   },
   {
     title: "Settings",

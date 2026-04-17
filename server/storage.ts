@@ -8,6 +8,9 @@ import {
   type InsertIndexer,
   type Downloader,
   type InsertDownloader,
+  type RootFolder,
+  type InsertRootFolder,
+  type UpdateRootFolder,
   type GameDownload,
   type InsertGameDownload,
   type Notification,
@@ -25,6 +28,7 @@ import {
   games,
   indexers,
   downloaders,
+  rootFolders,
   notifications,
   gameDownloads,
   userSettings,
@@ -86,6 +90,19 @@ export interface IStorage {
   updateDownloader(id: string, updates: Partial<InsertDownloader>): Promise<Downloader | undefined>;
   removeDownloader(id: string): Promise<boolean>;
 
+  // RootFolder methods (Gamearr)
+  getAllRootFolders(): Promise<RootFolder[]>;
+  getRootFolder(id: string): Promise<RootFolder | undefined>;
+  getRootFolderByPath(path: string): Promise<RootFolder | undefined>;
+  getEnabledRootFolders(): Promise<RootFolder[]>;
+  addRootFolder(folder: InsertRootFolder): Promise<RootFolder>;
+  updateRootFolder(id: string, updates: UpdateRootFolder): Promise<RootFolder | undefined>;
+  updateRootFolderHealth(
+    id: string,
+    health: { accessible: boolean; diskFreeBytes?: number | null; diskTotalBytes?: number | null }
+  ): Promise<RootFolder | undefined>;
+  removeRootFolder(id: string): Promise<boolean>;
+
   // GameDownload methods
   getDownloadingGameDownloads(): Promise<GameDownload[]>;
   updateGameDownloadStatus(id: string, status: string): Promise<void>;
@@ -140,6 +157,7 @@ export class MemStorage implements IStorage {
   private xrelNotified: Map<string, XrelNotifiedRelease>;
   private rssFeeds: Map<string, RssFeed>;
   private rssFeedItems: Map<string, RssFeedItem>;
+  private rootFolders: Map<string, RootFolder> = new Map();
 
   constructor() {
     this.users = new Map();
@@ -551,6 +569,73 @@ export class MemStorage implements IStorage {
 
   async removeDownloader(id: string): Promise<boolean> {
     return this.downloaders.delete(id);
+  }
+
+  // RootFolder methods (Gamearr)
+  async getAllRootFolders(): Promise<RootFolder[]> {
+    return Array.from(this.rootFolders.values()).sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  async getRootFolder(id: string): Promise<RootFolder | undefined> {
+    return this.rootFolders.get(id);
+  }
+
+  async getRootFolderByPath(path: string): Promise<RootFolder | undefined> {
+    return Array.from(this.rootFolders.values()).find((f) => f.path === path);
+  }
+
+  async getEnabledRootFolders(): Promise<RootFolder[]> {
+    return Array.from(this.rootFolders.values())
+      .filter((f) => f.enabled)
+      .sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  async addRootFolder(insert: InsertRootFolder): Promise<RootFolder> {
+    const id = randomUUID();
+    const folder: RootFolder = {
+      id,
+      path: insert.path,
+      label: insert.label,
+      enabled: insert.enabled ?? true,
+      accessible: false,
+      diskFreeBytes: null,
+      diskTotalBytes: null,
+      lastHealthCheck: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.rootFolders.set(id, folder);
+    return folder;
+  }
+
+  async updateRootFolder(id: string, updates: UpdateRootFolder): Promise<RootFolder | undefined> {
+    const folder = this.rootFolders.get(id);
+    if (!folder) return undefined;
+    const updated: RootFolder = { ...folder, ...updates, updatedAt: new Date() };
+    this.rootFolders.set(id, updated);
+    return updated;
+  }
+
+  async updateRootFolderHealth(
+    id: string,
+    health: { accessible: boolean; diskFreeBytes?: number | null; diskTotalBytes?: number | null }
+  ): Promise<RootFolder | undefined> {
+    const folder = this.rootFolders.get(id);
+    if (!folder) return undefined;
+    const updated: RootFolder = {
+      ...folder,
+      accessible: health.accessible,
+      diskFreeBytes: health.diskFreeBytes ?? folder.diskFreeBytes,
+      diskTotalBytes: health.diskTotalBytes ?? folder.diskTotalBytes,
+      lastHealthCheck: new Date(),
+      updatedAt: new Date(),
+    };
+    this.rootFolders.set(id, updated);
+    return updated;
+  }
+
+  async removeRootFolder(id: string): Promise<boolean> {
+    return this.rootFolders.delete(id);
   }
 
   // GameDownload methods
@@ -1200,6 +1285,70 @@ export class DatabaseStorage implements IStorage {
 
   async removeDownloader(id: string): Promise<boolean> {
     await db.delete(downloaders).where(eq(downloaders.id, id));
+    return true;
+  }
+
+  // RootFolder methods (Gamearr)
+  async getAllRootFolders(): Promise<RootFolder[]> {
+    return db.select().from(rootFolders).orderBy(rootFolders.path);
+  }
+
+  async getRootFolder(id: string): Promise<RootFolder | undefined> {
+    const [folder] = await db.select().from(rootFolders).where(eq(rootFolders.id, id));
+    return folder || undefined;
+  }
+
+  async getRootFolderByPath(path: string): Promise<RootFolder | undefined> {
+    const [folder] = await db.select().from(rootFolders).where(eq(rootFolders.path, path));
+    return folder || undefined;
+  }
+
+  async getEnabledRootFolders(): Promise<RootFolder[]> {
+    return db
+      .select()
+      .from(rootFolders)
+      .where(eq(rootFolders.enabled, true))
+      .orderBy(rootFolders.path);
+  }
+
+  async addRootFolder(insert: InsertRootFolder): Promise<RootFolder> {
+    const id = randomUUID();
+    const [folder] = await db
+      .insert(rootFolders)
+      .values({ ...insert, id })
+      .returning();
+    return folder;
+  }
+
+  async updateRootFolder(id: string, updates: UpdateRootFolder): Promise<RootFolder | undefined> {
+    const [updated] = await db
+      .update(rootFolders)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(rootFolders.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async updateRootFolderHealth(
+    id: string,
+    health: { accessible: boolean; diskFreeBytes?: number | null; diskTotalBytes?: number | null }
+  ): Promise<RootFolder | undefined> {
+    const [updated] = await db
+      .update(rootFolders)
+      .set({
+        accessible: health.accessible,
+        diskFreeBytes: health.diskFreeBytes ?? null,
+        diskTotalBytes: health.diskTotalBytes ?? null,
+        lastHealthCheck: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(rootFolders.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async removeRootFolder(id: string): Promise<boolean> {
+    await db.delete(rootFolders).where(eq(rootFolders.id, id));
     return true;
   }
 
