@@ -13,6 +13,7 @@ import {
   Newspaper,
   Rss,
   FolderTree,
+  ScanSearch,
 } from "lucide-react";
 import { useMemo } from "react";
 import {
@@ -95,6 +96,11 @@ const management = [
     title: "Root Folders",
     url: "/root-folders",
     icon: FolderTree,
+  },
+  {
+    title: "Library Scan",
+    url: "/library-scan",
+    icon: ScanSearch,
   },
   {
     title: "Settings",

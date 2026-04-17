@@ -21,6 +21,7 @@ const DownloadsPage = lazy(() => import("@/pages/downloads"));
 const IndexersPage = lazy(() => import("@/pages/indexers"));
 const DownloadersPage = lazy(() => import("@/pages/downloaders"));
 const RootFoldersPage = lazy(() => import("@/pages/root-folders"));
+const LibraryScanPage = lazy(() => import("@/pages/library-scan"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const LibraryPage = lazy(() => import("@/pages/library"));
@@ -44,6 +45,7 @@ function Router() {
         <Route path="/indexers" component={IndexersPage} />
         <Route path="/downloaders" component={DownloadersPage} />
         <Route path="/root-folders" component={RootFoldersPage} />
+        <Route path="/library-scan" component={LibraryScanPage} />
         <Route path="/settings" component={SettingsPage} />
         <Route path="/library" component={LibraryPage} />
         <Route path="/calendar" component={CalendarPage} />
@@ -88,6 +90,8 @@ function App() {
         return "Downloaders";
       case "/root-folders":
         return "Root Folders";
+      case "/library-scan":
+        return "Library Scan";
       case "/settings":
         return "Settings";
       case "/library":
