@@ -12,6 +12,7 @@ import {
   insertDownloaderSchema,
   insertRootFolderSchema,
   updateRootFolderSchema,
+  importTaskStatusSchema,
   insertNotificationSchema,
   updateUserSettingsSchema,
   updatePasswordSchema,
@@ -1795,6 +1796,123 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
+  // ==========================================================================
+  // Gamearr: Import pipeline (#4)
+  // History of post-download imports (move/hardlink/copy) from the downloader
+  // to the library root folder. Also exposes retry/dismiss endpoints.
+  // ==========================================================================
+
+  // Returns a map `{ [downloadHash]: { status, taskId, errorMessage } }` so the
+  // Downloads page can show an import status badge next to each item. We only
+  // keep the most recent task per hash (tasks are cascaded when the
+  // game_download is removed, so this stays bounded).
+  app.get("/api/import/status-by-hash", async (_req: Request, res: Response) => {
+    try {
+      const [tasks, downloads] = await Promise.all([
+        storage.getImportTasks(),
+        db.select().from((await import("../shared/schema.js")).gameDownloads),
+      ]);
+      const byId = new Map<string, (typeof downloads)[number]>();
+      for (const d of downloads) byId.set(d.id, d);
+
+      const out: Record<string, { status: string; taskId: string; errorMessage: string | null }> =
+        {};
+      for (const t of tasks) {
+        const gd = byId.get(t.gameDownloadId);
+        if (!gd) continue;
+        const key = gd.downloadHash.toLowerCase();
+        const existing = out[key];
+        const taskTs = t.createdAt ? new Date(t.createdAt).getTime() : 0;
+        const existingTs = existing
+          ? tasks.find((x) => x.id === existing.taskId)?.createdAt
+            ? new Date(tasks.find((x) => x.id === existing.taskId)!.createdAt!).getTime()
+            : 0
+          : 0;
+        if (!existing || taskTs >= existingTs) {
+          out[key] = {
+            status: t.status,
+            taskId: t.id,
+            errorMessage: t.errorMessage ?? null,
+          };
+        }
+      }
+      res.json(out);
+    } catch (error) {
+      routesLogger.error({ error }, "error building import status map");
+      res.status(500).json({ error: "Failed to build import status map" });
+    }
+  });
+
+  app.get("/api/import/tasks", async (req: Request, res: Response) => {
+    try {
+      const statusQuery =
+        typeof req.query.status === "string" ? req.query.status.trim() : undefined;
+      let status: string | undefined;
+      if (statusQuery) {
+        const parsed = importTaskStatusSchema.safeParse(statusQuery);
+        if (!parsed.success) {
+          return res.status(400).json({ error: "Invalid status filter" });
+        }
+        status = parsed.data;
+      }
+      const tasks = await storage.getImportTasks(status);
+      res.json(tasks);
+    } catch (error) {
+      routesLogger.error({ error }, "error listing import tasks");
+      res.status(500).json({ error: "Failed to list import tasks" });
+    }
+  });
+
+  app.post(
+    "/api/import/tasks/:id/retry",
+    sensitiveEndpointLimiter,
+    async (req: Request, res: Response) => {
+      try {
+        const task = await storage.getImportTask(req.params.id);
+        if (!task) return res.status(404).json({ error: "Import task not found" });
+        if (task.status === "in_progress") {
+          return res.status(409).json({ error: "Import task is already running" });
+        }
+
+        const { processCompletedDownload } = await import("./import-pipeline.js");
+        await storage.updateImportTask(task.id, {
+          status: "pending",
+          errorMessage: null,
+        });
+        // Fire-and-forget; the client polls /api/import/tasks for status.
+        processCompletedDownload(task.gameDownloadId, {
+          strategy: task.strategy as "move" | "hardlink" | "copy" | "symlink",
+          rootFolderId: task.targetRootFolderId ?? undefined,
+          taskId: task.id,
+        }).catch((err) => routesLogger.error({ err, taskId: task.id }, "retry import crashed"));
+        res.status(202).json({ accepted: true, taskId: task.id });
+      } catch (error) {
+        routesLogger.error({ error }, "error retrying import task");
+        res.status(500).json({ error: "Failed to retry import task" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/import/tasks/:id",
+    sensitiveEndpointLimiter,
+    async (req: Request, res: Response) => {
+      try {
+        const task = await storage.getImportTask(req.params.id);
+        if (!task) return res.status(404).json({ error: "Import task not found" });
+        if (task.status === "in_progress") {
+          return res.status(409).json({ error: "Cannot dismiss an in-progress task" });
+        }
+        const ok = await storage.removeImportTask(req.params.id);
+        if (!ok) return res.status(404).json({ error: "Import task not found" });
+        res.status(204).send();
+      } catch (error) {
+        routesLogger.error({ error }, "error deleting import task");
+        res.status(500).json({ error: "Failed to delete import task" });
+      }
+    }
+  );
+
   // Torznab search routes
 
   // Search for games using configured indexers (alias for /api/indexers/search)
@@ -1963,6 +2081,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         addStopped: addStopped ?? false,
         removeCompleted: removeCompleted ?? false,
         postImportCategory: postImportCategory || null,
+        defaultImportStrategy: "move",
         settings: settings || null,
         createdAt: new Date(),
         updatedAt: new Date(),

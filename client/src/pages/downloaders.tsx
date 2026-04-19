@@ -235,6 +235,7 @@ export default function DownloadersPage() {
       addStopped: false,
       removeCompleted: false,
       postImportCategory: "",
+      defaultImportStrategy: "move",
       settings: "",
     },
   });
@@ -265,6 +266,7 @@ export default function DownloadersPage() {
       addStopped: downloader.addStopped ?? false,
       removeCompleted: downloader.removeCompleted ?? false,
       postImportCategory: downloader.postImportCategory ?? "",
+      defaultImportStrategy: downloader.defaultImportStrategy ?? "move",
       settings: downloader.settings ?? "",
     });
     setIsDialogOpen(true);
@@ -288,6 +290,7 @@ export default function DownloadersPage() {
       addStopped: false,
       removeCompleted: false,
       postImportCategory: "",
+      defaultImportStrategy: "move",
       settings: "",
     });
     setIsDialogOpen(true);
@@ -869,6 +872,33 @@ export default function DownloadersPage() {
                               </FormControl>
                               <FormDescription className="text-xs">
                                 Category after download completes
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="defaultImportStrategy"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Default Import Strategy</FormLabel>
+                              <Select onValueChange={field.onChange} value={field.value ?? "move"}>
+                                <FormControl>
+                                  <SelectTrigger data-testid="select-downloader-importstrategy">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  <SelectItem value="move">Move</SelectItem>
+                                  <SelectItem value="hardlink">Hardlink</SelectItem>
+                                  <SelectItem value="copy">Copy</SelectItem>
+                                  <SelectItem value="symlink">Symlink</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <FormDescription className="text-xs">
+                                How Gamearr imports completed downloads into your library. Hardlink
+                                saves disk space when the download and library share a filesystem.
                               </FormDescription>
                               <FormMessage />
                             </FormItem>

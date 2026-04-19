@@ -144,6 +144,9 @@ export const downloaders = sqliteTable("downloaders", {
   addStopped: integer("add_stopped", { mode: "boolean" }).default(false),
   removeCompleted: integer("remove_completed", { mode: "boolean" }).default(false),
   postImportCategory: text("post_import_category"),
+  // Gamearr: per-downloader preference used by the post-download import
+  // pipeline (#4). Valid values: move | hardlink | copy | symlink.
+  defaultImportStrategy: text("default_import_strategy").notNull().default("move"),
   settings: text("settings"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).default(
     sql`(strftime('%s', 'now') * 1000)`
@@ -174,6 +177,29 @@ export const gameDownloads = sqliteTable("game_downloads", {
 
 // Legacy table name for backward compatibility during migration
 export const legacy_gameDownloads = gameDownloads;
+
+// Gamearr: post-download import pipeline (#4). One row per import attempt.
+// Strategy is the filesystem operation used to move files from the downloader's
+// save path into the target root folder. `targetRelativePath` is relative to
+// `targetRootFolderId.path`, keeping the library portable.
+export const importTasks = sqliteTable("import_tasks", {
+  id: text("id").primaryKey(),
+  gameDownloadId: text("game_download_id")
+    .notNull()
+    .references(() => gameDownloads.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("pending"), // pending | in_progress | completed | failed
+  strategy: text("strategy").notNull().default("move"), // move | hardlink | copy | symlink
+  sourcePath: text("source_path").notNull(),
+  targetRootFolderId: text("target_root_folder_id").references(() => rootFolders.id, {
+    onDelete: "set null",
+  }),
+  targetRelativePath: text("target_relative_path").notNull(),
+  errorMessage: text("error_message"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).default(
+    sql`(strftime('%s', 'now') * 1000)`
+  ),
+  completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+});
 
 // Track xREL.to release notifications so we notify once per (game, release) and know which games have xREL listings
 export const xrelNotifiedReleases = sqliteTable("xrel_notified_releases", {
@@ -291,6 +317,24 @@ export const insertGameDownloadSchema = createInsertSchema(gameDownloads).omit({
 // Legacy schema name for backward compatibility
 export const insertGameDownloadLegacySchema = insertGameDownloadSchema;
 
+// Gamearr: import_tasks Zod schemas
+export const importStrategySchema = z.enum(["move", "hardlink", "copy", "symlink"]);
+export const importTaskStatusSchema = z.enum(["pending", "in_progress", "completed", "failed"]);
+
+export const insertImportTaskSchema = createInsertSchema(importTasks).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+});
+
+export const updateImportTaskSchema = createInsertSchema(importTasks)
+  .omit({
+    id: true,
+    gameDownloadId: true,
+    createdAt: true,
+  })
+  .partial();
+
 export const insertNotificationSchema = createInsertSchema(notifications).omit({
   id: true,
   createdAt: true,
@@ -371,6 +415,13 @@ export type UpdateGameFile = (typeof updateGameFileSchema)["_output"];
 
 export type GameDownload = typeof gameDownloads.$inferSelect;
 export type InsertGameDownload = (typeof insertGameDownloadSchema)["_output"];
+
+// Gamearr: import_tasks types
+export type ImportStrategy = z.infer<typeof importStrategySchema>;
+export type ImportTaskStatus = z.infer<typeof importTaskStatusSchema>;
+export type ImportTask = typeof importTasks.$inferSelect;
+export type InsertImportTask = (typeof insertImportTaskSchema)["_output"];
+export type UpdateImportTask = (typeof updateImportTaskSchema)["_output"];
 
 export type XrelNotifiedRelease = typeof xrelNotifiedReleases.$inferSelect;
 export type InsertXrelNotifiedRelease = (typeof insertXrelNotifiedReleaseSchema)["_output"];

@@ -16,6 +16,9 @@ import {
   type UpdateGameFile,
   type GameDownload,
   type InsertGameDownload,
+  type ImportTask,
+  type InsertImportTask,
+  type UpdateImportTask,
   type Notification,
   type InsertNotification,
   type UserSettings,
@@ -35,6 +38,7 @@ import {
   gameFiles,
   notifications,
   gameDownloads,
+  importTasks,
   userSettings,
   systemConfig,
   xrelNotifiedReleases,
@@ -118,8 +122,17 @@ export interface IStorage {
 
   // GameDownload methods
   getDownloadingGameDownloads(): Promise<GameDownload[]>;
+  getGameDownload(id: string): Promise<GameDownload | undefined>;
   updateGameDownloadStatus(id: string, status: string): Promise<void>;
   addGameDownload(gameDownload: InsertGameDownload): Promise<GameDownload>;
+
+  // ImportTask methods (Gamearr)
+  getImportTasks(status?: string): Promise<ImportTask[]>;
+  getImportTask(id: string): Promise<ImportTask | undefined>;
+  getImportTasksByGameDownload(gameDownloadId: string): Promise<ImportTask[]>;
+  addImportTask(task: InsertImportTask): Promise<ImportTask>;
+  updateImportTask(id: string, updates: UpdateImportTask): Promise<ImportTask | undefined>;
+  removeImportTask(id: string): Promise<boolean>;
 
   // Notification methods
   getNotifications(limit?: number): Promise<Notification[]>;
@@ -172,6 +185,7 @@ export class MemStorage implements IStorage {
   private rssFeedItems: Map<string, RssFeedItem>;
   private rootFolders: Map<string, RootFolder> = new Map();
   private gameFiles: Map<string, GameFile> = new Map();
+  private importTasks: Map<string, ImportTask> = new Map();
 
   constructor() {
     this.users = new Map();
@@ -556,6 +570,7 @@ export class MemStorage implements IStorage {
       addStopped: insertDownloader.addStopped ?? false,
       removeCompleted: insertDownloader.removeCompleted ?? false,
       postImportCategory: insertDownloader.postImportCategory ?? null,
+      defaultImportStrategy: insertDownloader.defaultImportStrategy ?? "move",
       settings: insertDownloader.settings ?? null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -729,6 +744,66 @@ export class MemStorage implements IStorage {
     };
     this.gameDownloads.set(id, gameDownload);
     return gameDownload;
+  }
+
+  async getGameDownload(id: string): Promise<GameDownload | undefined> {
+    return this.gameDownloads.get(id);
+  }
+
+  // ImportTask methods (Gamearr)
+  async getImportTasks(status?: string): Promise<ImportTask[]> {
+    const list = Array.from(this.importTasks.values());
+    const filtered = status ? list.filter((t) => t.status === status) : list;
+    return filtered.sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
+  }
+
+  async getImportTask(id: string): Promise<ImportTask | undefined> {
+    return this.importTasks.get(id);
+  }
+
+  async getImportTasksByGameDownload(gameDownloadId: string): Promise<ImportTask[]> {
+    return Array.from(this.importTasks.values())
+      .filter((t) => t.gameDownloadId === gameDownloadId)
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }
+
+  async addImportTask(insert: InsertImportTask): Promise<ImportTask> {
+    const id = randomUUID();
+    const task: ImportTask = {
+      id,
+      gameDownloadId: insert.gameDownloadId,
+      status: insert.status ?? "pending",
+      strategy: insert.strategy ?? "move",
+      sourcePath: insert.sourcePath,
+      targetRootFolderId: insert.targetRootFolderId ?? null,
+      targetRelativePath: insert.targetRelativePath,
+      errorMessage: insert.errorMessage ?? null,
+      createdAt: new Date(),
+      completedAt: null,
+    };
+    this.importTasks.set(id, task);
+    return task;
+  }
+
+  async updateImportTask(id: string, updates: UpdateImportTask): Promise<ImportTask | undefined> {
+    const existing = this.importTasks.get(id);
+    if (!existing) return undefined;
+    const next: ImportTask = {
+      ...existing,
+      ...updates,
+      completedAt:
+        updates.status === "completed" || updates.status === "failed"
+          ? new Date()
+          : (existing.completedAt ?? null),
+    };
+    this.importTasks.set(id, next);
+    return next;
+  }
+
+  async removeImportTask(id: string): Promise<boolean> {
+    return this.importTasks.delete(id);
   }
 
   // Notification methods
@@ -1497,6 +1572,64 @@ export class DatabaseStorage implements IStorage {
       .values({ ...insertGameDownload, id })
       .returning();
     return gameDownload;
+  }
+
+  async getGameDownload(id: string): Promise<GameDownload | undefined> {
+    const [row] = await db.select().from(gameDownloads).where(eq(gameDownloads.id, id));
+    return row || undefined;
+  }
+
+  // ImportTask methods (Gamearr)
+  async getImportTasks(status?: string): Promise<ImportTask[]> {
+    const query = status
+      ? db.select().from(importTasks).where(eq(importTasks.status, status))
+      : db.select().from(importTasks);
+    const rows = await query;
+    return rows.sort(
+      (a: ImportTask, b: ImportTask) =>
+        new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
+  }
+
+  async getImportTask(id: string): Promise<ImportTask | undefined> {
+    const [row] = await db.select().from(importTasks).where(eq(importTasks.id, id));
+    return row || undefined;
+  }
+
+  async getImportTasksByGameDownload(gameDownloadId: string): Promise<ImportTask[]> {
+    return db
+      .select()
+      .from(importTasks)
+      .where(eq(importTasks.gameDownloadId, gameDownloadId))
+      .orderBy(desc(importTasks.createdAt));
+  }
+
+  async addImportTask(insert: InsertImportTask): Promise<ImportTask> {
+    const id = randomUUID();
+    const [row] = await db
+      .insert(importTasks)
+      .values({ ...insert, id })
+      .returning();
+    return row;
+  }
+
+  async updateImportTask(id: string, updates: UpdateImportTask): Promise<ImportTask | undefined> {
+    const completedAt =
+      updates.status === "completed" || updates.status === "failed" ? new Date() : undefined;
+    const [row] = await db
+      .update(importTasks)
+      .set({
+        ...updates,
+        ...(completedAt !== undefined ? { completedAt } : {}),
+      })
+      .where(eq(importTasks.id, id))
+      .returning();
+    return row || undefined;
+  }
+
+  async removeImportTask(id: string): Promise<boolean> {
+    const [deleted] = await db.delete(importTasks).where(eq(importTasks.id, id)).returning();
+    return !!deleted;
   }
 
   // Notification methods

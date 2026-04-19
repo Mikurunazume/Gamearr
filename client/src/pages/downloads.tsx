@@ -32,6 +32,7 @@ import {
   Info,
   Download,
   Newspaper,
+  PackageOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -97,6 +98,14 @@ export default function Downloads() {
   } = useQuery<DownloadsResponse>({
     queryKey: ["/api/downloads"],
     refetchInterval: 5000, // Refresh every 5 seconds
+  });
+
+  // Import status badge data — maps lowercased download hash -> latest import task.
+  const { data: importStatusMap = {} } = useQuery<
+    Record<string, { status: string; taskId: string; errorMessage: string | null }>
+  >({
+    queryKey: ["/api/import/status-by-hash"],
+    refetchInterval: 5000,
   });
 
   const downloads = useMemo(() => downloadsData?.downloads || [], [downloadsData?.downloads]);
@@ -392,6 +401,32 @@ export default function Downloads() {
                         >
                           {download.downloaderName}
                         </Badge>
+                        {(() => {
+                          const importInfo = importStatusMap[download.id.toLowerCase()];
+                          if (!importInfo) return null;
+                          const color =
+                            importInfo.status === "failed"
+                              ? "text-red-500 border-red-500/40"
+                              : importInfo.status === "completed"
+                                ? "text-green-500 border-green-500/40"
+                                : "text-blue-500 border-blue-500/40";
+                          const label =
+                            importInfo.status === "in_progress"
+                              ? "Importing"
+                              : importInfo.status.charAt(0).toUpperCase() +
+                                importInfo.status.slice(1);
+                          return (
+                            <Badge
+                              variant="outline"
+                              className={color}
+                              data-testid={`badge-import-${download.id}`}
+                              title={importInfo.errorMessage ?? `Import ${importInfo.status}`}
+                            >
+                              <PackageOpen className="h-3 w-3 mr-1" />
+                              Import: {label}
+                            </Badge>
+                          );
+                        })()}
                         {/* Download Type Badge */}
                         <Badge
                           className={`text-xs border-none ${getDownloadTypeColor(download.downloadType || "torrent")}`}

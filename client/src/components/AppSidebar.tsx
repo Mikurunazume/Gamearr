@@ -14,6 +14,7 @@ import {
   Rss,
   FolderTree,
   ScanSearch,
+  PackageOpen,
 } from "lucide-react";
 import { useMemo } from "react";
 import {
@@ -101,6 +102,11 @@ const management = [
     title: "Library Scan",
     url: "/library-scan",
     icon: ScanSearch,
+  },
+  {
+    title: "Import History",
+    url: "/import-history",
+    icon: PackageOpen,
   },
   {
     title: "Settings",

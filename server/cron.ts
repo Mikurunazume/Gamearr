@@ -7,6 +7,7 @@ import { searchAllIndexers } from "./search.js";
 import { xrelClient, DEFAULT_XREL_BASE } from "./xrel.js";
 import { refreshAllRootFoldersHealth } from "./root-folders.js";
 import { scanAllEnabledRootFolders } from "./library-scanner.js";
+import { processCompletedDownload } from "./import-pipeline.js";
 
 import { downloadRulesSchema } from "../shared/schema.js";
 import { categorizeDownload } from "../shared/download-categorizer.js";
@@ -274,28 +275,26 @@ async function checkDownloadStatus() {
               "Download completed"
             );
 
-            // Update DB - mark as completed
+            // Only enqueue the import once per game_download — re-runs of the
+            // cron could otherwise spawn duplicate tasks while the first one
+            // is still in flight.
+            const alreadyCompleted = download.status === "completed";
             await storage.updateGameDownloadStatus(download.id, "completed");
 
-            // Update Game status to 'owned' (which means we have the files)
-            await storage.updateGameStatus(download.gameId, { status: "owned" });
+            if (!alreadyCompleted) {
+              processCompletedDownload(download.id).catch((err) =>
+                igdbLogger.error({ err, gameDownloadId: download.id }, "import pipeline failed")
+              );
+            }
 
-            igdbLogger.info(
-              { gameId: download.gameId, downloadId: download.id },
-              "Updated game status to 'owned' after completion"
-            );
-
-            // Fetch game title for notification
             const game = await storage.getGame(download.gameId);
             const gameTitle = game ? game.title : download.downloadTitle;
-
-            // Send notification
-            const message = `Download finished for ${gameTitle}`;
+            const message = `Download finished for ${gameTitle}. Import queued.`;
             const notification = await storage.addNotification({
               type: "success",
               title: "Download Completed",
               message,
-              link: "/library",
+              link: "/import-history",
             });
             notifyUser("notification", notification);
           } else {
