@@ -1,4 +1,4 @@
-import { Switch, Route, useLocation } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -12,48 +12,80 @@ import { Suspense, lazy } from "react";
 import LoadingFallback from "@/components/LoadingFallback";
 import { ThemeProvider } from "next-themes";
 
-// ⚡ Bolt: Code splitting with React.lazy
-// This reduces the initial bundle size by loading pages only when needed.
-const Dashboard = lazy(() => import("@/components/Dashboard"));
-const DiscoverPage = lazy(() => import("@/pages/discover"));
+// ⚡ Code splitting with React.lazy
 const SearchPage = lazy(() => import("@/pages/search"));
-const DownloadsPage = lazy(() => import("@/pages/downloads"));
-const IndexersPage = lazy(() => import("@/pages/indexers"));
-const DownloadersPage = lazy(() => import("@/pages/downloaders"));
-const RootFoldersPage = lazy(() => import("@/pages/root-folders"));
-const LibraryScanPage = lazy(() => import("@/pages/library-scan"));
-const ImportHistoryPage = lazy(() => import("@/pages/import-history"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const LibraryPage = lazy(() => import("@/pages/library"));
 const CalendarPage = lazy(() => import("@/pages/calendar"));
-const WishlistPage = lazy(() => import("@/pages/wishlist"));
-const XrelReleasesPage = lazy(() => import("@/pages/xrel-releases"));
-const RssPage = lazy(() => import("@/pages/rss"));
 const LoginPage = lazy(() => import("@/pages/auth/login"));
 const SetupPage = lazy(() => import("@/pages/auth/setup"));
+const GameDetailPage = lazy(() => import("@/pages/game-detail"));
+const ActivityQueuePage = lazy(() => import("@/pages/activity-queue"));
+const ActivityHistoryPage = lazy(() => import("@/pages/activity-history"));
+const ActivityBlacklistPage = lazy(() => import("@/pages/activity-blacklist"));
+const WantedPage = lazy(() => import("@/pages/wanted"));
+const SystemPage = lazy(() => import("@/pages/system"));
 
 function Router() {
   return (
     <Suspense fallback={<LoadingFallback />}>
       <Switch>
+        {/* Auth */}
         <Route path="/login" component={LoginPage} />
         <Route path="/setup" component={SetupPage} />
-        <Route path="/" component={Dashboard} />
-        <Route path="/discover" component={DiscoverPage} />
-        <Route path="/search" component={SearchPage} />
-        <Route path="/downloads" component={DownloadsPage} />
-        <Route path="/indexers" component={IndexersPage} />
-        <Route path="/downloaders" component={DownloadersPage} />
-        <Route path="/root-folders" component={RootFoldersPage} />
-        <Route path="/library-scan" component={LibraryScanPage} />
-        <Route path="/import-history" component={ImportHistoryPage} />
-        <Route path="/settings" component={SettingsPage} />
+
+        {/* Core pages */}
         <Route path="/library" component={LibraryPage} />
+        <Route path="/games/:id" component={GameDetailPage} />
         <Route path="/calendar" component={CalendarPage} />
-        <Route path="/wishlist" component={WishlistPage} />
-        <Route path="/xrel" component={XrelReleasesPage} />
-        <Route path="/rss" component={RssPage} />
+        <Route path="/wanted" component={WantedPage} />
+        <Route path="/search" component={SearchPage} />
+
+        {/* Activity */}
+        <Route path="/activity/queue" component={ActivityQueuePage} />
+        <Route path="/activity/history" component={ActivityHistoryPage} />
+        <Route path="/activity/blacklist" component={ActivityBlacklistPage} />
+
+        {/* System + Settings */}
+        <Route path="/system" component={SystemPage} />
+        <Route path="/settings" component={SettingsPage} />
+
+        {/* Backwards-compatibility redirects */}
+        <Route path="/">
+          <Redirect to="/library" />
+        </Route>
+        <Route path="/downloads">
+          <Redirect to="/activity/queue" />
+        </Route>
+        <Route path="/discover">
+          <Redirect to="/library?tab=discover" />
+        </Route>
+        <Route path="/wishlist">
+          <Redirect to="/wanted" />
+        </Route>
+        <Route path="/xrel">
+          <Redirect to="/settings?tab=sources" />
+        </Route>
+        <Route path="/rss">
+          <Redirect to="/settings?tab=sources" />
+        </Route>
+        <Route path="/indexers">
+          <Redirect to="/settings?tab=indexers" />
+        </Route>
+        <Route path="/downloaders">
+          <Redirect to="/settings?tab=downloaders" />
+        </Route>
+        <Route path="/root-folders">
+          <Redirect to="/settings?tab=media" />
+        </Route>
+        <Route path="/library-scan">
+          <Redirect to="/settings?tab=media" />
+        </Route>
+        <Route path="/import-history">
+          <Redirect to="/activity/history" />
+        </Route>
+
         <Route component={NotFound} />
       </Switch>
     </Suspense>
@@ -77,39 +109,27 @@ function App() {
   };
 
   const getPageTitle = (path: string) => {
+    if (path.startsWith("/games/")) return "Game Details";
+    if (path.startsWith("/settings")) return "Settings";
     switch (path) {
-      case "/":
-        return "Dashboard";
-      case "/discover":
-        return "Discover";
-      case "/search":
-        return "Search";
-      case "/downloads":
-        return "Downloads";
-      case "/indexers":
-        return "Indexers";
-      case "/downloaders":
-        return "Downloaders";
-      case "/root-folders":
-        return "Root Folders";
-      case "/library-scan":
-        return "Library Scan";
-      case "/import-history":
-        return "Import History";
-      case "/settings":
-        return "Settings";
       case "/library":
         return "Library";
       case "/calendar":
         return "Calendar";
-      case "/wishlist":
-        return "Wishlist";
-      case "/xrel":
-        return "xREL.to releases";
-      case "/rss":
-        return "RSS Feeds";
+      case "/wanted":
+        return "Wanted";
+      case "/search":
+        return "Search";
+      case "/activity/queue":
+        return "Queue";
+      case "/activity/history":
+        return "History";
+      case "/activity/blacklist":
+        return "Blacklist";
+      case "/system":
+        return "System";
       default:
-        return "Questarr";
+        return "Gamearr";
     }
   };
 
