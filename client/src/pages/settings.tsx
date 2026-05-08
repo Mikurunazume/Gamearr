@@ -57,6 +57,30 @@ interface CertInfo {
   selfSigned: boolean;
   valid: boolean;
 }
+
+const NAMING_SAMPLE: GameContext = {
+  title: "Elden Ring",
+  year: 2022,
+  platform: "PC",
+  group: "CODEX",
+  source: "GOG",
+  version: "v1.0.2",
+};
+
+const FOLDER_PRESETS = [
+  { label: "{Title} ({Year})", value: "{Title} ({Year})" },
+  { label: "{Title} ({Year}) [{Source}]", value: "{Title} ({Year}) [{Source}]" },
+  { label: "{TitleThe} ({Year})", value: "{TitleThe} ({Year})" },
+  { label: "{Title}", value: "{Title}" },
+];
+
+const FILE_PRESETS = [
+  { label: "{Title} ({Year}) [{Group}]", value: "{Title} ({Year}) [{Group}]" },
+  { label: "{Title} ({Year})", value: "{Title} ({Year})" },
+  { label: "{Title} [{Group}]", value: "{Title} [{Group}]" },
+  { label: "{Title}", value: "{Title}" },
+];
+
 export default function SettingsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -171,6 +195,7 @@ export default function SettingsPage() {
   const [selectedKey, setSelectedKey] = useState<File | null>(null);
   const certInputRef = useRef<HTMLInputElement>(null);
   const keyInputRef = useRef<HTMLInputElement>(null);
+  const lastFocusedNamingInput = useRef<"folder" | "file">("file");
 
   const uploadCertMutation = useMutation({
     mutationFn: async () => {
@@ -410,29 +435,6 @@ export default function SettingsPage() {
   const handleSaveXrel = () => {
     saveXrelMutation.mutate();
   };
-
-  const NAMING_SAMPLE: GameContext = {
-    title: "Elden Ring",
-    year: 2022,
-    platform: "PC",
-    group: "CODEX",
-    source: "GOG",
-    version: "v1.0.2",
-  };
-
-  const FOLDER_PRESETS = [
-    { label: "{Title} ({Year})", value: "{Title} ({Year})" },
-    { label: "{Title} ({Year}) [{Source}]", value: "{Title} ({Year}) [{Source}]" },
-    { label: "{TitleThe} ({Year})", value: "{TitleThe} ({Year})" },
-    { label: "{Title}", value: "{Title}" },
-  ];
-
-  const FILE_PRESETS = [
-    { label: "{Title} ({Year}) [{Group}]", value: "{Title} ({Year}) [{Group}]" },
-    { label: "{Title} ({Year})", value: "{Title} ({Year})" },
-    { label: "{Title} [{Group}]", value: "{Title} [{Group}]" },
-    { label: "{Title}", value: "{Title}" },
-  ];
 
   const saveNamingMutation = useMutation({
     mutationFn: (data: { folderNamingTemplate?: string; fileNamingTemplate?: string }) =>
@@ -1298,6 +1300,9 @@ export default function SettingsPage() {
                       id="folder-template"
                       value={folderNamingTemplate}
                       onChange={(e) => setFolderNamingTemplate(e.target.value)}
+                      onFocus={() => {
+                        lastFocusedNamingInput.current = "folder";
+                      }}
                       placeholder="{Title} ({Year})"
                       className="font-mono"
                     />
@@ -1333,6 +1338,9 @@ export default function SettingsPage() {
                       id="file-template"
                       value={fileNamingTemplate}
                       onChange={(e) => setFileNamingTemplate(e.target.value)}
+                      onFocus={() => {
+                        lastFocusedNamingInput.current = "file";
+                      }}
                       placeholder="{Title} ({Year}) [{Group}]"
                       className="font-mono"
                     />
@@ -1376,8 +1384,7 @@ export default function SettingsPage() {
                         key={v}
                         className="text-xs bg-muted px-2 py-1 rounded cursor-pointer hover:bg-muted/80"
                         onClick={() => {
-                          const active = document.activeElement as HTMLInputElement | null;
-                          if (active?.id === "folder-template") {
+                          if (lastFocusedNamingInput.current === "folder") {
                             setFolderNamingTemplate((t) => t + v);
                           } else {
                             setFileNamingTemplate((t) => t + v);
