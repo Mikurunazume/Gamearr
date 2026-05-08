@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSearch } from "wouter";
 import {
   Settings as SettingsIcon,
   Server,
@@ -17,6 +18,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   Upload,
+  Trash2,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -39,8 +41,16 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import AutoDownloadRulesSettings from "@/components/AutoDownloadRulesSettings";
 import PasswordSettings from "@/components/PasswordSettings";
-import type { Config, UserSettings, DownloadRules } from "@shared/schema";
+import type { Config, UserSettings, DownloadRules, RssFeed } from "@shared/schema";
 import { downloadRulesSchema } from "@shared/schema";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   renderTemplate,
   DEFAULT_FOLDER_TEMPLATE,
@@ -84,6 +94,9 @@ const FILE_PRESETS = [
 export default function SettingsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const search = useSearch();
+  const urlTab = new URLSearchParams(search).get("tab") ?? "general";
+  const [activeSettingsTab, setActiveSettingsTab] = useState(urlTab);
 
   const {
     data: config,
@@ -448,6 +461,65 @@ export default function SettingsPage() {
     },
   });
 
+  // Sources tab data
+  const { data: rssFeeds = [] } = useQuery<RssFeed[]>({
+    queryKey: ["/api/rss/feeds"],
+    queryFn: () =>
+      fetch("/api/rss/feeds", {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      }).then((r) => r.json()),
+  });
+
+  const deleteRssFeedMutation = useMutation({
+    mutationFn: (feedId: string) =>
+      fetch(`/api/rss/feeds/${feedId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      }).then((r) => {
+        if (!r.ok) throw new Error();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/rss/feeds"] });
+      toast({ title: "RSS feed removed" });
+    },
+  });
+
+  // Connect tab data
+  const { data: connectors = [] } = useQuery({
+    queryKey: ["/api/connectors"],
+    queryFn: () =>
+      fetch("/api/connectors", {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      }).then((r) => r.json()),
+  });
+
+  const deleteConnectorMutation = useMutation({
+    mutationFn: (id: string) =>
+      fetch(`/api/connectors/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      }).then((r) => {
+        if (!r.ok) throw new Error();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/connectors"] });
+      toast({ title: "Connector removed" });
+    },
+  });
+
+  const testConnectorMutation = useMutation({
+    mutationFn: (id: string) =>
+      fetch(`/api/connectors/${id}/test`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      }).then((r) => r.json()),
+    onSuccess: (data: { ok: boolean; status?: number }) =>
+      toast({
+        title: data.ok ? "Test notification sent!" : `Test failed (HTTP ${data.status})`,
+        variant: data.ok ? "default" : "destructive",
+      }),
+  });
+
   const handleSaveIgdb = () => {
     if (!igdbClientId || !igdbClientSecret) {
       toast({
@@ -508,8 +580,8 @@ export default function SettingsPage() {
           </Alert>
         )}
 
-        <Tabs defaultValue="general" className="w-full">
-          <TabsList className="grid w-full grid-cols-7 mb-8">
+        <Tabs value={activeSettingsTab} onValueChange={setActiveSettingsTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-9 mb-8">
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="rules">Rules</TabsTrigger>
             <TabsTrigger value="services">Services</TabsTrigger>
@@ -517,6 +589,8 @@ export default function SettingsPage() {
             <TabsTrigger value="security">Security</TabsTrigger>
             <TabsTrigger value="system">System</TabsTrigger>
             <TabsTrigger value="media-management">Media Management</TabsTrigger>
+            <TabsTrigger value="sources">Sources</TabsTrigger>
+            <TabsTrigger value="connect">Connect</TabsTrigger>
           </TabsList>
 
           <TabsContent value="general" className="space-y-6">
@@ -1408,6 +1482,142 @@ export default function SettingsPage() {
                 >
                   {saveNamingMutation.isPending ? "Saving…" : "Save Changes"}
                 </Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="sources" className="space-y-6">
+            {/* xREL section */}
+            <Card>
+              <CardHeader>
+                <CardTitle>xREL.to</CardTitle>
+                <CardDescription>Enable xREL release monitoring sources</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>Scene Releases</Label>
+                    <p className="text-xs text-muted-foreground">Monitor scene group releases</p>
+                  </div>
+                  <Switch checked={xrelSceneReleases} onCheckedChange={setXrelSceneReleases} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>P2P Releases</Label>
+                    <p className="text-xs text-muted-foreground">Monitor peer-to-peer releases</p>
+                  </div>
+                  <Switch checked={xrelP2pReleases} onCheckedChange={setXrelP2pReleases} />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* RSS Feeds section */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>RSS Feeds</CardTitle>
+                    <CardDescription>Configured RSS feed sources</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {rssFeeds.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No RSS feeds configured.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>URL</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rssFeeds.map((feed) => (
+                        <TableRow key={feed.id}>
+                          <TableCell>{feed.name}</TableCell>
+                          <TableCell className="font-mono text-xs truncate max-w-[200px]">
+                            {feed.url}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={feed.status === "ok" ? "default" : "destructive"}>
+                              {feed.status ?? "unknown"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => deleteRssFeedMutation.mutate(feed.id)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="connect" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Notification Connectors</CardTitle>
+                    <CardDescription>Discord webhooks and generic HTTP webhooks</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {connectors.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No connectors configured.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {connectors.map((c: any) => (
+                      <div
+                        key={c.id}
+                        className="flex items-center justify-between border rounded-md p-3"
+                      >
+                        <div>
+                          <p className="font-medium text-sm">{c.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {c.type} · {c.url}
+                          </p>
+                          <div className="flex gap-1 mt-1">
+                            {(c.events as string[]).map((e: string) => (
+                              <Badge key={e} variant="secondary" className="text-xs">
+                                {e}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => testConnectorMutation.mutate(c.id)}
+                            disabled={testConnectorMutation.isPending}
+                          >
+                            Test
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => deleteConnectorMutation.mutate(c.id)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
