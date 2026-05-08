@@ -2483,50 +2483,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ─── Activity ──────────────────────────────────────────────────────────────
 
   app.get("/api/activity/queue", authenticateToken, async (req: Request, res: Response) => {
-    const allDownloaders = await storage.getAllDownloaders();
-    interface QueueItem {
-      downloadId: string;
-      gameId?: string;
-      gameTitle?: string;
-      releaseName: string;
-      size?: number;
-      progress: number;
-      speed?: number;
-      seeders?: number;
-      client: string;
-      eta?: number;
-      status: string;
-    }
-    const queue: QueueItem[] = [];
-
-    for (const d of allDownloaders) {
-      if (!d.enabled) continue;
-      try {
-        const downloads = await DownloaderManager.getAllDownloads(d);
-        for (const dl of downloads) {
-          const gameDownloads = await storage.getGameDownloadsByHash(dl.id);
-          const gameDownload = gameDownloads[0];
-          const game = gameDownload ? await storage.getGame(gameDownload.gameId) : undefined;
-          queue.push({
-            downloadId: dl.id,
-            gameId: game?.id,
-            gameTitle: game?.title,
-            releaseName: dl.name,
-            size: dl.size,
-            progress: dl.progress,
-            speed: dl.downloadSpeed,
-            seeders: dl.seeders,
-            client: d.name,
-            eta: dl.eta,
-            status: dl.status,
-          });
-        }
-      } catch {
-        // downloader unreachable — skip silently
+    try {
+      const allDownloaders = await storage.getEnabledDownloaders();
+      interface QueueItem {
+        downloadId: string;
+        gameId?: string;
+        gameTitle?: string;
+        releaseName: string;
+        size?: number;
+        progress: number;
+        speed?: number;
+        seeders?: number;
+        client: string;
+        eta?: number;
+        status: string;
       }
-    }
+      const queue: QueueItem[] = [];
 
-    res.json(queue);
+      for (const d of allDownloaders) {
+        try {
+          const downloads = await DownloaderManager.getAllDownloads(d);
+          for (const dl of downloads) {
+            const gameDownloads = await storage.getGameDownloadsByHash(dl.id);
+            const gameDownload = gameDownloads[0];
+            const game = gameDownload ? await storage.getGame(gameDownload.gameId) : undefined;
+            queue.push({
+              downloadId: dl.id,
+              gameId: game?.id,
+              gameTitle: game?.title,
+              releaseName: dl.name,
+              size: dl.size,
+              progress: dl.progress,
+              speed: dl.downloadSpeed,
+              seeders: dl.seeders,
+              client: d.name,
+              eta: dl.eta,
+              status: dl.status,
+            });
+          }
+        } catch {
+          // downloader unreachable — skip silently
+        }
+      }
+
+      res.json(queue);
+    } catch (err) {
+      routesLogger.error({ err }, "Failed to fetch activity queue");
+      res.status(500).json({ error: "Failed to fetch activity queue" });
+    }
   });
 
   app.get("/api/activity/history", authenticateToken, async (req: Request, res: Response) => {
@@ -2541,6 +2545,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const offset = (page - 1) * limit;
 
     const allDownloads = await storage.getAllGameDownloads();
+    const rowData = await Promise.all(
+      allDownloads.map(async (dl) => ({
+        dl,
+        game: await storage.getGame(dl.gameId),
+        tasks: await storage.getImportTasksByDownload(dl.id),
+      }))
+    );
 
     interface HistoryItem {
       id: string;
@@ -2554,8 +2565,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const items: HistoryItem[] = [];
 
-    for (const dl of allDownloads) {
-      const game = await storage.getGame(dl.gameId);
+    for (const { dl, game, tasks } of rowData) {
       if (!game) continue;
       const titleMatch =
         !searchFilter ||
@@ -2576,8 +2586,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Import task events
-      const tasks = await storage.getImportTasksByDownload(dl.id);
       for (const task of tasks) {
+        if (task.status !== "completed" && task.status !== "failed") continue;
         const action: "imported" | "failed" = task.status === "completed" ? "imported" : "failed";
         if (actionFilter && actionFilter !== action) continue;
         items.push({
@@ -2620,8 +2630,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!body.success) {
       return res.status(400).json({ error: "Invalid request", details: body.error.issues });
     }
-    const entry = await storage.addToBlacklist(body.data);
-    res.status(201).json(entry);
+    try {
+      const entry = await storage.addToBlacklist(body.data);
+      res.status(201).json(entry);
+    } catch (err) {
+      routesLogger.error({ err }, "Failed to add blacklist entry");
+      res.status(500).json({ error: "Failed to add blacklist entry" });
+    }
   });
 
   app.delete("/api/activity/blacklist", authenticateToken, async (_req: Request, res: Response) => {
