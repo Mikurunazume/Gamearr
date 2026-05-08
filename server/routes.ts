@@ -68,6 +68,7 @@ const upload = multer({
 import { searchAllIndexers } from "./search.js";
 import { xrelClient, DEFAULT_XREL_BASE, ALLOWED_XREL_DOMAINS } from "./xrel.js";
 import { normalizeTitle, cleanReleaseName } from "../shared/title-utils.js";
+import { previewAll, type GameContext } from "../shared/naming-engine.js";
 import archiver from "archiver";
 import helmet from "helmet";
 
@@ -78,6 +79,29 @@ const storageCache = {
   expiry: 0,
   ttl: 30 * 1000, // 30 seconds in milliseconds
 };
+
+const updateNamingTemplateSchema = z.object({
+  folderNamingTemplate: z.string().max(200).optional(),
+  fileNamingTemplate: z.string().max(200).optional(),
+});
+
+const gameContextSchema = z.object({
+  title: z.string(),
+  year: z.number().int().nullable(),
+  platform: z.string().optional(),
+  version: z.string().optional(),
+  group: z.string().optional(),
+  source: z.string().optional(),
+});
+
+const previewRequestSchema = z.object({
+  template: z.string().max(200),
+  samples: z.array(gameContextSchema).max(10),
+});
+
+function isTemplateSafe(template: string): boolean {
+  return !template.includes("..") && !/^[/\\]/.test(template) && !/^[A-Za-z]:/.test(template);
+}
 
 // Helper to parse category query param which might be string, array, or comma-separated
 export function parseCategories(input: unknown): string[] | undefined {
@@ -2619,6 +2643,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: "Failed to update settings",
         message: error instanceof Error ? error.message : "Unknown error",
       });
+    }
+  });
+
+  app.get("/api/naming/template", authenticateToken, async (req, res) => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const userId = (req as any).user.id;
+      let settings = await storage.getUserSettings(userId);
+      if (!settings) {
+        settings = await storage.createUserSettings({ userId });
+      }
+      res.json({
+        folderNamingTemplate: settings.folderNamingTemplate,
+        fileNamingTemplate: settings.fileNamingTemplate,
+      });
+    } catch (error) {
+      routesLogger.error({ error }, "error fetching naming templates");
+      res.status(500).json({ error: "Failed to fetch naming templates" });
+    }
+  });
+
+  app.patch("/api/naming/template", authenticateToken, async (req, res) => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const userId = (req as any).user.id;
+      const updates = updateNamingTemplateSchema.parse(req.body);
+
+      if (updates.folderNamingTemplate && !isTemplateSafe(updates.folderNamingTemplate)) {
+        return res.status(400).json({ error: "Invalid template: path traversal detected" });
+      }
+      if (updates.fileNamingTemplate && !isTemplateSafe(updates.fileNamingTemplate)) {
+        return res.status(400).json({ error: "Invalid template: path traversal detected" });
+      }
+
+      let settings = await storage.getUserSettings(userId);
+      if (!settings) {
+        settings = await storage.createUserSettings({ userId, ...updates });
+      } else {
+        settings = await storage.updateUserSettings(userId, updates);
+      }
+
+      if (!settings) {
+        return res.status(404).json({ error: "Settings not found" });
+      }
+
+      res.json({
+        folderNamingTemplate: settings.folderNamingTemplate,
+        fileNamingTemplate: settings.fileNamingTemplate,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid template data", details: error.errors });
+      }
+      routesLogger.error({ error }, "error updating naming templates");
+      res.status(500).json({ error: "Failed to update naming templates" });
+    }
+  });
+
+  app.post("/api/naming/preview", authenticateToken, async (req, res) => {
+    try {
+      const { template, samples } = previewRequestSchema.parse(req.body);
+      const results = previewAll(template, samples as GameContext[]);
+      res.json({ results });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid preview request", details: error.errors });
+      }
+      routesLogger.error({ error }, "error generating naming preview");
+      res.status(500).json({ error: "Failed to generate preview" });
     }
   });
 
