@@ -2480,6 +2480,165 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ─── Activity ──────────────────────────────────────────────────────────────
+
+  app.get("/api/activity/queue", authenticateToken, async (req: Request, res: Response) => {
+    const allDownloaders = await storage.getAllDownloaders();
+    interface QueueItem {
+      downloadId: string;
+      gameId?: string;
+      gameTitle?: string;
+      releaseName: string;
+      size?: number;
+      progress: number;
+      speed?: number;
+      seeders?: number;
+      client: string;
+      eta?: number;
+      status: string;
+    }
+    const queue: QueueItem[] = [];
+
+    for (const d of allDownloaders) {
+      if (!d.enabled) continue;
+      try {
+        const downloads = await DownloaderManager.getAllDownloads(d);
+        for (const dl of downloads) {
+          const gameDownloads = await storage.getGameDownloadsByHash(dl.id);
+          const gameDownload = gameDownloads[0];
+          const game = gameDownload ? await storage.getGame(gameDownload.gameId) : undefined;
+          queue.push({
+            downloadId: dl.id,
+            gameId: game?.id,
+            gameTitle: game?.title,
+            releaseName: dl.name,
+            size: dl.size,
+            progress: dl.progress,
+            speed: dl.downloadSpeed,
+            seeders: dl.seeders,
+            client: d.name,
+            eta: dl.eta,
+            status: dl.status,
+          });
+        }
+      } catch {
+        // downloader unreachable — skip silently
+      }
+    }
+
+    res.json(queue);
+  });
+
+  app.get("/api/activity/history", authenticateToken, async (req: Request, res: Response) => {
+    const page = Math.max(1, parseInt(String(req.query.page ?? "1")));
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? "50"))));
+    const actionFilter = String(req.query.action ?? "")
+      .toLowerCase()
+      .trim();
+    const searchFilter = String(req.query.search ?? "")
+      .toLowerCase()
+      .trim();
+    const offset = (page - 1) * limit;
+
+    const allDownloads = await storage.getAllGameDownloads();
+
+    interface HistoryItem {
+      id: string;
+      date: number;
+      gameId: string;
+      gameTitle: string;
+      releaseName: string;
+      action: "grabbed" | "imported" | "failed";
+      detail?: string;
+    }
+
+    const items: HistoryItem[] = [];
+
+    for (const dl of allDownloads) {
+      const game = await storage.getGame(dl.gameId);
+      if (!game) continue;
+      const titleMatch =
+        !searchFilter ||
+        dl.downloadTitle.toLowerCase().includes(searchFilter) ||
+        game.title.toLowerCase().includes(searchFilter);
+      if (!titleMatch) continue;
+
+      // Grabbed event
+      if (!actionFilter || actionFilter === "grabbed") {
+        items.push({
+          id: `dl-${dl.id}`,
+          date: dl.addedAt?.getTime() ?? Date.now(),
+          gameId: game.id,
+          gameTitle: game.title,
+          releaseName: dl.downloadTitle,
+          action: "grabbed",
+        });
+      }
+
+      // Import task events
+      const tasks = await storage.getImportTasksByDownload(dl.id);
+      for (const task of tasks) {
+        const action: "imported" | "failed" = task.status === "completed" ? "imported" : "failed";
+        if (actionFilter && actionFilter !== action) continue;
+        items.push({
+          id: `task-${task.id}`,
+          date: (task.completedAt ?? task.createdAt)?.getTime() ?? Date.now(),
+          gameId: game.id,
+          gameTitle: game.title,
+          releaseName: dl.downloadTitle,
+          action,
+          detail: task.errorMessage ?? undefined,
+        });
+      }
+    }
+
+    items.sort((a, b) => b.date - a.date);
+    const total = items.length;
+    const paged = items.slice(offset, offset + limit);
+
+    res.json({ items: paged, total, page, pages: Math.ceil(total / limit) });
+  });
+
+  app.get("/api/activity/blacklist", authenticateToken, async (_req: Request, res: Response) => {
+    const list = await storage.getBlacklist();
+    const enriched = await Promise.all(
+      list.map(async (entry) => {
+        const game = entry.gameId ? await storage.getGame(entry.gameId) : undefined;
+        return { ...entry, gameTitle: game?.title };
+      })
+    );
+    res.json(enriched);
+  });
+
+  app.post("/api/activity/blacklist", authenticateToken, async (req: Request, res: Response) => {
+    const schema = z.object({
+      releaseName: z.string().min(1),
+      gameId: z.string().optional(),
+      reason: z.string().optional(),
+    });
+    const body = schema.safeParse(req.body);
+    if (!body.success) {
+      return res.status(400).json({ error: "Invalid request", details: body.error.issues });
+    }
+    const entry = await storage.addToBlacklist(body.data);
+    res.status(201).json(entry);
+  });
+
+  app.delete("/api/activity/blacklist", authenticateToken, async (_req: Request, res: Response) => {
+    await storage.clearBlacklist();
+    res.json({ ok: true });
+  });
+
+  app.delete(
+    "/api/activity/blacklist/:id",
+    authenticateToken,
+    async (req: Request, res: Response) => {
+      const removed = await storage.removeFromBlacklist(req.params.id);
+      if (!removed) return res.status(404).json({ error: "Not found" });
+      res.json({ ok: true });
+    }
+  );
+
   // Notification routes
   app.get("/api/notifications", async (req, res) => {
     try {
