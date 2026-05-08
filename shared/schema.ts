@@ -29,6 +29,8 @@ export const userSettings = sqliteTable("user_settings", {
   lastAutoSearch: integer("last_auto_search", { mode: "timestamp_ms" }),
   xrelSceneReleases: integer("xrel_scene_releases", { mode: "boolean" }).notNull().default(true),
   xrelP2pReleases: integer("xrel_p2p_releases", { mode: "boolean" }).notNull().default(false),
+  folderNamingTemplate: text("folder_naming_template").notNull().default("{Title} ({Year})"),
+  fileNamingTemplate: text("file_naming_template").notNull().default("{Title} ({Year}) [{Group}]"),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).default(
     sql`(strftime('%s', 'now') * 1000)`
   ),
