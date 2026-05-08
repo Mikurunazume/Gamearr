@@ -30,6 +30,10 @@ import {
   type InsertRssFeed,
   type RssFeedItem,
   type InsertRssFeedItem,
+  type ReleaseBlacklist,
+  type NotificationConnector,
+  type InsertNotificationConnector,
+  type UpdateNotificationConnector,
   users,
   games,
   indexers,
@@ -44,6 +48,8 @@ import {
   xrelNotifiedReleases,
   rssFeeds,
   rssFeedItems,
+  releaseBlacklist,
+  notificationConnectors,
 } from "../shared/schema.js";
 import { randomUUID } from "crypto";
 import { db } from "./db.js";
@@ -169,6 +175,32 @@ export interface IStorage {
   hasXrelNotifiedRelease(gameId: string, xrelReleaseId: string): Promise<boolean>;
   getGameIdsWithXrelReleases(): Promise<string[]>;
   getWantedGamesGroupedByUser(): Promise<Map<string, Game[]>>;
+
+  // Blacklist methods
+  getBlacklist(): Promise<ReleaseBlacklist[]>;
+  addToBlacklist(entry: {
+    gameId?: string;
+    releaseName: string;
+    reason?: string;
+  }): Promise<ReleaseBlacklist>;
+  removeFromBlacklist(id: string): Promise<boolean>;
+  clearBlacklist(): Promise<void>;
+  isBlacklisted(releaseName: string): Promise<boolean>;
+
+  // Notification connector methods
+  getConnectors(): Promise<NotificationConnector[]>;
+  getConnector(id: string): Promise<NotificationConnector | undefined>;
+  createConnector(connector: InsertNotificationConnector): Promise<NotificationConnector>;
+  updateConnector(
+    id: string,
+    updates: UpdateNotificationConnector
+  ): Promise<NotificationConnector | undefined>;
+  deleteConnector(id: string): Promise<boolean>;
+
+  // Activity query helpers
+  getGameDownloadsByHash(hash: string): Promise<GameDownload[]>;
+  getAllGameDownloads(): Promise<GameDownload[]>;
+  getImportTasksByDownload(gameDownloadId: string): Promise<ImportTask[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -1008,6 +1040,56 @@ export class MemStorage implements IStorage {
     Array.from(this.xrelNotified.values()).forEach((r) => ids.add(r.gameId));
     return Array.from(ids);
   }
+
+  // Blacklist methods (MemStorage stubs — not used in production)
+  async getBlacklist(): Promise<ReleaseBlacklist[]> {
+    return [];
+  }
+  async addToBlacklist(_entry: {
+    gameId?: string;
+    releaseName: string;
+    reason?: string;
+  }): Promise<ReleaseBlacklist> {
+    throw new Error("Not implemented");
+  }
+  async removeFromBlacklist(_id: string): Promise<boolean> {
+    return false;
+  }
+  async clearBlacklist(): Promise<void> {}
+  async isBlacklisted(_releaseName: string): Promise<boolean> {
+    return false;
+  }
+
+  // Notification connector methods (MemStorage stubs — not used in production)
+  async getConnectors(): Promise<NotificationConnector[]> {
+    return [];
+  }
+  async getConnector(_id: string): Promise<NotificationConnector | undefined> {
+    return undefined;
+  }
+  async createConnector(_connector: InsertNotificationConnector): Promise<NotificationConnector> {
+    throw new Error("Not implemented");
+  }
+  async updateConnector(
+    _id: string,
+    _updates: UpdateNotificationConnector
+  ): Promise<NotificationConnector | undefined> {
+    return undefined;
+  }
+  async deleteConnector(_id: string): Promise<boolean> {
+    return false;
+  }
+
+  // Activity query helpers (MemStorage stubs — not used in production)
+  async getGameDownloadsByHash(_hash: string): Promise<GameDownload[]> {
+    return [];
+  }
+  async getAllGameDownloads(): Promise<GameDownload[]> {
+    return Array.from(this.gameDownloads.values());
+  }
+  async getImportTasksByDownload(gameDownloadId: string): Promise<ImportTask[]> {
+    return Array.from(this.importTasks.values()).filter((t) => t.gameDownloadId === gameDownloadId);
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1803,6 +1885,106 @@ export class DatabaseStorage implements IStorage {
       .selectDistinct({ gameId: xrelNotifiedReleases.gameId })
       .from(xrelNotifiedReleases);
     return rows.map((r) => r.gameId);
+  }
+
+  // Blacklist methods
+  async getBlacklist(): Promise<ReleaseBlacklist[]> {
+    return db.select().from(releaseBlacklist).orderBy(desc(releaseBlacklist.createdAt));
+  }
+
+  async addToBlacklist(entry: {
+    gameId?: string;
+    releaseName: string;
+    reason?: string;
+  }): Promise<ReleaseBlacklist> {
+    const now = new Date();
+    const row = {
+      id: randomUUID(),
+      gameId: entry.gameId ?? null,
+      releaseName: entry.releaseName,
+      reason: entry.reason ?? null,
+      createdAt: now,
+    };
+    await db.insert(releaseBlacklist).values(row);
+    return row as ReleaseBlacklist;
+  }
+
+  async removeFromBlacklist(id: string): Promise<boolean> {
+    const result = await db.delete(releaseBlacklist).where(eq(releaseBlacklist.id, id));
+    return (result.changes ?? 0) > 0;
+  }
+
+  async clearBlacklist(): Promise<void> {
+    await db.delete(releaseBlacklist);
+  }
+
+  async isBlacklisted(releaseName: string): Promise<boolean> {
+    const rows = await db
+      .select({ id: releaseBlacklist.id })
+      .from(releaseBlacklist)
+      .where(eq(releaseBlacklist.releaseName, releaseName))
+      .limit(1);
+    return rows.length > 0;
+  }
+
+  // Notification connector methods
+  async getConnectors(): Promise<NotificationConnector[]> {
+    return db.select().from(notificationConnectors).orderBy(notificationConnectors.name);
+  }
+
+  async getConnector(id: string): Promise<NotificationConnector | undefined> {
+    const rows = await db
+      .select()
+      .from(notificationConnectors)
+      .where(eq(notificationConnectors.id, id))
+      .limit(1);
+    return rows[0];
+  }
+
+  async createConnector(connector: InsertNotificationConnector): Promise<NotificationConnector> {
+    const now = new Date();
+    const row = {
+      id: randomUUID(),
+      ...connector,
+      enabled: connector.enabled ?? true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await db.insert(notificationConnectors).values(row);
+    return row as NotificationConnector;
+  }
+
+  async updateConnector(
+    id: string,
+    updates: UpdateNotificationConnector
+  ): Promise<NotificationConnector | undefined> {
+    const existing = await this.getConnector(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...updates, updatedAt: new Date() };
+    await db.update(notificationConnectors).set(updated).where(eq(notificationConnectors.id, id));
+    return updated;
+  }
+
+  async deleteConnector(id: string): Promise<boolean> {
+    const result = await db.delete(notificationConnectors).where(eq(notificationConnectors.id, id));
+    return (result.changes ?? 0) > 0;
+  }
+
+  // Activity query helpers
+  async getGameDownloadsByHash(hash: string): Promise<GameDownload[]> {
+    return db.select().from(gameDownloads).where(eq(gameDownloads.downloadHash, hash));
+  }
+
+  async getAllGameDownloads(): Promise<GameDownload[]> {
+    return db.select().from(gameDownloads).orderBy(desc(gameDownloads.addedAt));
+  }
+
+  async getImportTasksByDownload(gameDownloadId: string): Promise<ImportTask[]> {
+    return db
+      .select()
+      .from(importTasks)
+      .where(eq(importTasks.gameDownloadId, gameDownloadId))
+      .orderBy(desc(importTasks.createdAt));
   }
 }
 
