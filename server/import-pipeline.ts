@@ -24,8 +24,15 @@ import path from "path";
 import { storage } from "./storage.js";
 import { DownloaderManager } from "./downloaders.js";
 import { igdbLogger, routesLogger } from "./logger.js";
-import { cleanReleaseName } from "../shared/title-utils.js";
+import { cleanReleaseName, parseReleaseMetadata } from "../shared/title-utils.js";
 import { classifyFile } from "./library-scanner.js";
+import {
+  renderTemplate,
+  sanitizeFilename,
+  DEFAULT_FOLDER_TEMPLATE,
+  DEFAULT_FILE_TEMPLATE,
+  type GameContext,
+} from "../shared/naming-engine.js";
 import type {
   Game,
   ImportStrategy,
@@ -49,24 +56,30 @@ export interface ImportPlan {
   files: ImportFilePlan[];
 }
 
-// Strip characters that aren't portable across Windows/NTFS and POSIX
-// filesystems. The leading `\x00-\x1f` range covers C0 control chars — we
-// mean to match them literally, so the `no-control-regex` lint is silenced.
-// eslint-disable-next-line no-control-regex
-const SAFE_CHARS = /[<>:"|?*\x00-\x1f]/g;
-
 // ---------- Naming ----------
 
-/**
- * Render a destination folder name for a game. When `naming_templates` (#5)
- * lands, this function will consult the template engine — for now we apply
- * a fixed `{Title} ({Year})` template (or just the cleaned title if no year).
- */
-export function renderGameFolderName(game: Game): string {
-  const title = (game.title || "Unknown").replace(SAFE_CHARS, " ").replace(/\s+/g, " ").trim();
+export function buildGameContext(game: Game, downloadTitle?: string): GameContext {
   const year = game.releaseDate ? new Date(game.releaseDate).getUTCFullYear() : null;
-  if (year && !Number.isNaN(year)) return `${title} (${year})`;
-  return title;
+  const meta = downloadTitle ? parseReleaseMetadata(downloadTitle) : undefined;
+  return {
+    title: game.title || "Unknown",
+    year: year && !Number.isNaN(year) ? year : null,
+    platform: meta?.platform,
+    version: meta?.version,
+    group: meta?.group,
+    source: meta?.drm,
+  };
+}
+
+export function renderGameFolderName(
+  game: Game,
+  folderTemplate: string,
+  downloadTitle?: string
+): string {
+  return sanitizeFilename(
+    renderTemplate(folderTemplate, buildGameContext(game, downloadTitle)),
+    "windows"
+  );
 }
 
 // ---------- Source discovery ----------
@@ -184,9 +197,19 @@ async function listFilesRecursively(
 export async function planImport(
   sourcePath: string,
   game: Game,
-  rootFolder: RootFolder
+  rootFolder: RootFolder,
+  options?: {
+    folderTemplate?: string;
+    fileTemplate?: string;
+    downloadTitle?: string;
+  }
 ): Promise<ImportPlan> {
-  const targetDirRelative = renderGameFolderName(game);
+  const folderTemplate = options?.folderTemplate ?? DEFAULT_FOLDER_TEMPLATE;
+  const fileTemplate = options?.fileTemplate ?? DEFAULT_FILE_TEMPLATE;
+  const downloadTitle = options?.downloadTitle;
+
+  const targetDirRelative = renderGameFolderName(game, folderTemplate, downloadTitle);
+  const ctx = buildGameContext(game, downloadTitle);
   const files = await listFilesRecursively(sourcePath);
 
   const sourceStat = await fs.promises.stat(sourcePath);
@@ -198,15 +221,20 @@ export async function planImport(
 
     let relativeToSource: string;
     if (sourceStat.isFile()) {
-      // Flat import of a single file: keep only the basename.
       relativeToSource = path.basename(f.absolute);
     } else {
       relativeToSource = path.relative(sourceRoot, f.absolute);
     }
 
+    const ext = path.extname(relativeToSource);
+    const subdir = path.dirname(relativeToSource);
+    const renderedStem = sanitizeFilename(renderTemplate(fileTemplate, ctx), "windows");
+    const filename = (renderedStem || path.basename(relativeToSource, ext)) + ext;
+    const newRelative = subdir === "." ? filename : path.join(subdir, filename);
+
     plan.push({
       sourceAbsolute: f.absolute,
-      targetRelative: path.join(targetDirRelative, relativeToSource),
+      targetRelative: path.join(targetDirRelative, newRelative),
       sizeBytes: f.sizeBytes,
     });
   }
@@ -383,6 +411,10 @@ export async function processCompletedDownload(
   if (!game) throw new Error(`game ${gameDownload.gameId} not found`);
   if (!downloader) throw new Error(`downloader ${gameDownload.downloaderId} not found`);
 
+  const namingSettings = game.userId ? await storage.getUserSettings(game.userId) : null;
+  const folderTemplate = namingSettings?.folderNamingTemplate ?? DEFAULT_FOLDER_TEMPLATE;
+  const fileTemplate = namingSettings?.fileNamingTemplate ?? DEFAULT_FILE_TEMPLATE;
+
   const strategy: ImportStrategy =
     overrides?.strategy ??
     (downloader.defaultImportStrategy as ImportStrategy | undefined) ??
@@ -404,7 +436,7 @@ export async function processCompletedDownload(
   // Targetting preview: use cleaned release name as fallback dest when the game
   // title is empty (shouldn't happen in practice, but keeps the row useful).
   const previewTargetRelative = game.title
-    ? renderGameFolderName(game)
+    ? renderGameFolderName(game, folderTemplate, gameDownload.downloadTitle)
     : cleanReleaseName(gameDownload.downloadTitle);
 
   const task = overrides?.taskId
@@ -444,7 +476,11 @@ export async function processCompletedDownload(
   });
 
   try {
-    const plan = await planImport(sourcePath, game, rootFolder);
+    const plan = await planImport(sourcePath, game, rootFolder, {
+      folderTemplate,
+      fileTemplate,
+      downloadTitle: gameDownload.downloadTitle,
+    });
     if (plan.files.length === 0) {
       return fail("Source contains no importable files");
     }
@@ -476,4 +512,4 @@ export async function processCompletedDownload(
   }
 }
 
-export const __testing = { renderGameFolderName, planImport };
+export const __testing = { renderGameFolderName, planImport, buildGameContext };
