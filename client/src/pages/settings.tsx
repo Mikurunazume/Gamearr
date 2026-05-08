@@ -41,6 +41,12 @@ import AutoDownloadRulesSettings from "@/components/AutoDownloadRulesSettings";
 import PasswordSettings from "@/components/PasswordSettings";
 import type { Config, UserSettings, DownloadRules } from "@shared/schema";
 import { downloadRulesSchema } from "@shared/schema";
+import {
+  renderTemplate,
+  DEFAULT_FOLDER_TEMPLATE,
+  DEFAULT_FILE_TEMPLATE,
+} from "@shared/naming-engine";
+import type { GameContext } from "@shared/naming-engine";
 import { useState, useEffect, useRef } from "react";
 
 interface CertInfo {
@@ -88,6 +94,8 @@ export default function SettingsPage() {
   const [xrelSceneReleases, setXrelSceneReleases] = useState(true);
   const [xrelP2pReleases, setXrelP2pReleases] = useState(false);
   const [xrelApiBase, setXrelApiBase] = useState("");
+  const [folderNamingTemplate, setFolderNamingTemplate] = useState(DEFAULT_FOLDER_TEMPLATE);
+  const [fileNamingTemplate, setFileNamingTemplate] = useState(DEFAULT_FILE_TEMPLATE);
 
   // Sync with fetched settings
   useEffect(() => {
@@ -114,6 +122,8 @@ export default function SettingsPage() {
       }
       setXrelSceneReleases(userSettings.xrelSceneReleases ?? true);
       setXrelP2pReleases(userSettings.xrelP2pReleases ?? false);
+      setFolderNamingTemplate(userSettings.folderNamingTemplate ?? DEFAULT_FOLDER_TEMPLATE);
+      setFileNamingTemplate(userSettings.fileNamingTemplate ?? DEFAULT_FILE_TEMPLATE);
     }
     if (config?.xrel) {
       setXrelApiBase(config.xrel.apiBase ?? "");
@@ -401,6 +411,41 @@ export default function SettingsPage() {
     saveXrelMutation.mutate();
   };
 
+  const NAMING_SAMPLE: GameContext = {
+    title: "Elden Ring",
+    year: 2022,
+    platform: "PC",
+    group: "CODEX",
+    source: "GOG",
+    version: "v1.0.2",
+  };
+
+  const FOLDER_PRESETS = [
+    { label: "{Title} ({Year})", value: "{Title} ({Year})" },
+    { label: "{Title} ({Year}) [{Source}]", value: "{Title} ({Year}) [{Source}]" },
+    { label: "{TitleThe} ({Year})", value: "{TitleThe} ({Year})" },
+    { label: "{Title}", value: "{Title}" },
+  ];
+
+  const FILE_PRESETS = [
+    { label: "{Title} ({Year}) [{Group}]", value: "{Title} ({Year}) [{Group}]" },
+    { label: "{Title} ({Year})", value: "{Title} ({Year})" },
+    { label: "{Title} [{Group}]", value: "{Title} [{Group}]" },
+    { label: "{Title}", value: "{Title}" },
+  ];
+
+  const saveNamingMutation = useMutation({
+    mutationFn: (data: { folderNamingTemplate?: string; fileNamingTemplate?: string }) =>
+      apiRequest("PATCH", "/api/naming/template", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
+      toast({ title: "Naming templates saved" });
+    },
+    onError: () => {
+      toast({ title: "Failed to save naming templates", variant: "destructive" });
+    },
+  });
+
   const handleSaveIgdb = () => {
     if (!igdbClientId || !igdbClientSecret) {
       toast({
@@ -462,13 +507,14 @@ export default function SettingsPage() {
         )}
 
         <Tabs defaultValue="general" className="w-full">
-          <TabsList className="grid w-full grid-cols-6 mb-8">
+          <TabsList className="grid w-full grid-cols-7 mb-8">
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="rules">Rules</TabsTrigger>
             <TabsTrigger value="services">Services</TabsTrigger>
             <TabsTrigger value="account">Account</TabsTrigger>
             <TabsTrigger value="security">Security</TabsTrigger>
             <TabsTrigger value="system">System</TabsTrigger>
+            <TabsTrigger value="media-management">Media Management</TabsTrigger>
           </TabsList>
 
           <TabsContent value="general" className="space-y-6">
@@ -1230,6 +1276,131 @@ export default function SettingsPage() {
                     </div>
                   </>
                 )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="media-management" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Naming Templates</CardTitle>
+                <CardDescription>
+                  Define how game folders and files are named on disk after import. Uses{" "}
+                  <code className="text-xs bg-muted px-1 rounded">{"{Variable}"}</code> tokens.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Folder Template */}
+                <div className="space-y-2">
+                  <Label htmlFor="folder-template">Folder Naming</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="folder-template"
+                      value={folderNamingTemplate}
+                      onChange={(e) => setFolderNamingTemplate(e.target.value)}
+                      placeholder="{Title} ({Year})"
+                      className="font-mono"
+                    />
+                    <Select value="" onValueChange={(v) => setFolderNamingTemplate(v)}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Presets…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FOLDER_PRESETS.map((p) => (
+                          <SelectItem key={p.value} value={p.value}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="text-sm text-muted-foreground font-mono">
+                    Preview:{" "}
+                    <span className="text-foreground">
+                      {renderTemplate(
+                        folderNamingTemplate || DEFAULT_FOLDER_TEMPLATE,
+                        NAMING_SAMPLE
+                      ) || "—"}
+                    </span>
+                  </p>
+                </div>
+
+                {/* File Template */}
+                <div className="space-y-2">
+                  <Label htmlFor="file-template">File Naming</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="file-template"
+                      value={fileNamingTemplate}
+                      onChange={(e) => setFileNamingTemplate(e.target.value)}
+                      placeholder="{Title} ({Year}) [{Group}]"
+                      className="font-mono"
+                    />
+                    <Select value="" onValueChange={(v) => setFileNamingTemplate(v)}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Presets…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FILE_PRESETS.map((p) => (
+                          <SelectItem key={p.value} value={p.value}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="text-sm text-muted-foreground font-mono">
+                    Preview:{" "}
+                    <span className="text-foreground">
+                      {renderTemplate(fileNamingTemplate || DEFAULT_FILE_TEMPLATE, NAMING_SAMPLE) ||
+                        "—"}
+                      .iso
+                    </span>
+                  </p>
+                </div>
+
+                {/* Variable Reference */}
+                <div className="space-y-2">
+                  <Label>Available Variables</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      "{Title}",
+                      "{TitleThe}",
+                      "{Year}",
+                      "{Platform}",
+                      "{Version}",
+                      "{Group}",
+                      "{Source}",
+                    ].map((v) => (
+                      <code
+                        key={v}
+                        className="text-xs bg-muted px-2 py-1 rounded cursor-pointer hover:bg-muted/80"
+                        onClick={() => {
+                          const active = document.activeElement as HTMLInputElement | null;
+                          if (active?.id === "folder-template") {
+                            setFolderNamingTemplate((t) => t + v);
+                          } else {
+                            setFileNamingTemplate((t) => t + v);
+                          }
+                        }}
+                      >
+                        {v}
+                      </code>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Click a variable to append it to the focused input field.
+                  </p>
+                </div>
+
+                <Button
+                  onClick={() =>
+                    saveNamingMutation.mutate({ folderNamingTemplate, fileNamingTemplate })
+                  }
+                  disabled={saveNamingMutation.isPending}
+                >
+                  {saveNamingMutation.isPending ? "Saving…" : "Save Changes"}
+                </Button>
               </CardContent>
             </Card>
           </TabsContent>
