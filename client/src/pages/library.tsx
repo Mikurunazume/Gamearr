@@ -17,10 +17,24 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useSearch, useLocation } from "wouter";
+import DiscoverPage from "@/pages/discover";
 
 export default function LibraryPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const searchStr = useSearch();
+  const [, setLocation] = useLocation();
+  const initialTab = new URLSearchParams(searchStr).get("tab") ?? "all";
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    setLocation(tab === "all" ? "/library" : `/library?tab=${tab}`, { replace: true });
+  };
+
   const [viewMode, setViewMode] = useState<"grid" | "list">(() => {
     return (localStorage.getItem("libraryViewMode") as "grid" | "list") || "grid";
   });
@@ -48,12 +62,18 @@ export default function LibraryPage() {
     queryKey: ["/api/games"],
   });
 
-  // Library typically contains owned, completed, or actively downloading games
-  const libraryGames = useMemo(() => {
-    return games.filter((g) =>
-      ["owned", "completed", "downloading"].includes(g.status)
-    );
-  }, [games]);
+  const tabGames = useMemo(() => {
+    switch (activeTab) {
+      case "wanted":
+        return games.filter((g) => g.status === "wanted");
+      case "downloading":
+        return games.filter((g) => g.status === "downloading");
+      case "owned":
+        return games.filter((g) => ["owned", "completed"].includes(g.status));
+      default:
+        return games; // "all" — shows everything including wanted
+    }
+  }, [games, activeTab]);
 
   const statusMutation = useMutation({
     mutationFn: async ({ gameId, status }: { gameId: string; status: GameStatus }) => {
@@ -80,73 +100,93 @@ export default function LibraryPage() {
   });
 
   return (
-    <div className="h-full overflow-auto p-6">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">Library</h1>
-          <p className="text-muted-foreground">Your collection of games</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {viewMode === "list" && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 gap-1">
-                  <Settings2 className="h-3.5 w-3.5" />
-                  <span className="sr-only sm:not-sr-only sm:inline-block">
-                    {listDensity === "comfortable"
-                      ? "Comfortable"
-                      : listDensity === "compact"
-                        ? "Compact"
-                        : "Ultra-compact"}
-                  </span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Row Density</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setListDensity("comfortable")}>
-                  Comfortable
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setListDensity("compact")}>
-                  Compact
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setListDensity("ultra-compact")}>
-                  Ultra-compact
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          <ToggleGroup
-            type="single"
-            value={viewMode}
-            onValueChange={(value) => value && setViewMode(value as "grid" | "list")}
-          >
-            <ToggleGroupItem value="grid" aria-label="Grid View">
-              <LayoutGrid className="h-4 w-4" />
-            </ToggleGroupItem>
-            <ToggleGroupItem value="list" aria-label="List View">
-              <List className="h-4 w-4" />
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </div>
+    <div className="h-full overflow-auto flex flex-col">
+      <div className="border-b px-4 pt-3">
+        <Tabs value={activeTab} onValueChange={handleTabChange}>
+          <TabsList>
+            <TabsTrigger value="all">All</TabsTrigger>
+            <TabsTrigger value="wanted">Wanted</TabsTrigger>
+            <TabsTrigger value="downloading">Downloading</TabsTrigger>
+            <TabsTrigger value="owned">Owned</TabsTrigger>
+            <TabsTrigger value="discover">Discover</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
 
-      {libraryGames.length === 0 && !isLoading ? (
-        <EmptyState
-          icon={Gamepad2}
-          title="No games in library"
-          description="Your library is looking a bit empty. Track games you own or want to play from the Discover page."
-          actionLabel="Discover Games"
-          actionLink="/discover"
-        />
+      {activeTab === "discover" ? (
+        <div className="flex-1 min-h-0">
+          <DiscoverPage />
+        </div>
       ) : (
-        <GameGrid
-          games={libraryGames}
-          onStatusChange={(id, status) => statusMutation.mutate({ gameId: id, status })}
-          isLoading={isLoading}
-          viewMode={viewMode}
-          density={listDensity}
-        />
+        <div className="p-6 flex-1">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h1 className="text-3xl font-bold">Library</h1>
+              <p className="text-muted-foreground">Your collection of games</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {viewMode === "list" && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-8 gap-1">
+                      <Settings2 className="h-3.5 w-3.5" />
+                      <span className="sr-only sm:not-sr-only sm:inline-block">
+                        {listDensity === "comfortable"
+                          ? "Comfortable"
+                          : listDensity === "compact"
+                            ? "Compact"
+                            : "Ultra-compact"}
+                      </span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuLabel>Row Density</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => setListDensity("comfortable")}>
+                      Comfortable
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setListDensity("compact")}>
+                      Compact
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setListDensity("ultra-compact")}>
+                      Ultra-compact
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              <ToggleGroup
+                type="single"
+                value={viewMode}
+                onValueChange={(value) => value && setViewMode(value as "grid" | "list")}
+              >
+                <ToggleGroupItem value="grid" aria-label="Grid View">
+                  <LayoutGrid className="h-4 w-4" />
+                </ToggleGroupItem>
+                <ToggleGroupItem value="list" aria-label="List View">
+                  <List className="h-4 w-4" />
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </div>
+          </div>
+
+          {tabGames.length === 0 && !isLoading ? (
+            <EmptyState
+              icon={Gamepad2}
+              title="No games in library"
+              description="Your library is looking a bit empty. Track games you own or want to play from the Discover page."
+              actionLabel="Discover Games"
+              actionLink="/discover"
+            />
+          ) : (
+            <GameGrid
+              games={tabGames}
+              onStatusChange={(id, status) => statusMutation.mutate({ gameId: id, status })}
+              isLoading={isLoading}
+              viewMode={viewMode}
+              density={listDensity}
+            />
+          )}
+        </div>
       )}
     </div>
   );
