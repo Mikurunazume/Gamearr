@@ -2704,7 +2704,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ lines: [] });
       }
 
-      const content = fs.readFileSync(logPath, "utf-8");
+      const content = await fs.promises.readFile(logPath, "utf-8");
       let lines = content.split("\n").filter(Boolean);
       if (level && ["INFO", "WARN", "ERROR", "DEBUG"].includes(level)) {
         lines = lines.filter((l) => l.toUpperCase().includes(level));
@@ -2734,6 +2734,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!body.success) {
         return res.status(400).json({ error: "Invalid request", details: body.error.issues });
       }
+      if (!(await isSafeUrl(body.data.url))) {
+        return res.status(400).json({ error: "Invalid or unsafe URL" });
+      }
       const connector = await storage.createConnector(body.data);
       res.status(201).json(connector);
     } catch (err) {
@@ -2747,6 +2750,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const body = updateNotificationConnectorSchema.safeParse(req.body);
       if (!body.success) {
         return res.status(400).json({ error: "Invalid request", details: body.error.issues });
+      }
+      if (body.data.url && !(await isSafeUrl(body.data.url))) {
+        return res.status(400).json({ error: "Invalid or unsafe URL" });
       }
       const updated = await storage.updateConnector(req.params.id, body.data);
       if (!updated) return res.status(404).json({ error: "Connector not found" });
@@ -2772,6 +2778,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const connector = await storage.getConnector(req.params.id);
       if (!connector) return res.status(404).json({ error: "Connector not found" });
+      if (!(await isSafeUrl(connector.url))) {
+        return res.status(400).json({ error: "Invalid or unsafe URL" });
+      }
       const response = await fetch(connector.url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

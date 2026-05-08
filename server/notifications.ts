@@ -21,7 +21,7 @@ export async function sendNotification(payload: NotificationPayload): Promise<vo
 
   for (const connector of connectors) {
     if (!connector.enabled) continue;
-    const events = connector.events as string[];
+    const events = connector.events;
     if (!events.includes(payload.event)) continue;
     try {
       const response = await fetch(connector.url, {
