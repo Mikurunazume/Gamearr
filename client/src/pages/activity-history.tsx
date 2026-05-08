@@ -74,7 +74,7 @@ export default function ActivityHistoryPage() {
           />
         </div>
         <div className="flex gap-1">
-          {(["", "grabbed", "imported", "failed"] as const).map((action) => (
+          {(["", "grabbed", "imported", "failed", "deleted"] as const).map((action) => (
             <Button
               key={action || "all"}
               variant={actionFilter === action ? "default" : "outline"}
