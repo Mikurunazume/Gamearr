@@ -86,6 +86,7 @@ export default function WantedPage() {
               <TableHead>Title</TableHead>
               <TableHead>Year</TableHead>
               <TableHead>Platforms</TableHead>
+              <TableHead>Last Search</TableHead>
               <TableHead>Status</TableHead>
               <TableHead />
             </TableRow>
@@ -106,6 +107,7 @@ export default function WantedPage() {
                       ))}
                     </div>
                   </TableCell>
+                  <TableCell className="text-muted-foreground text-xs">—</TableCell>
                   <TableCell>
                     <Badge variant="secondary">{game.status}</Badge>
                   </TableCell>

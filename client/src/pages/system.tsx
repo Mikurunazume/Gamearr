@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +35,7 @@ function formatBytes(bytes: number): string {
 export default function SystemPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [logLevel, setLogLevel] = useState("");
 
   const { data: status, isLoading: statusLoading } = useQuery<SystemStatus>({
     queryKey: ["/api/system/status"],
@@ -42,9 +44,11 @@ export default function SystemPage() {
   });
 
   const { data: logs } = useQuery<SystemLog>({
-    queryKey: ["/api/system/logs"],
+    queryKey: ["/api/system/logs", logLevel],
     queryFn: () =>
-      fetch("/api/system/logs?limit=200", { headers: authHeader() }).then((r) => r.json()),
+      fetch(`/api/system/logs?limit=500${logLevel ? `&level=${logLevel}` : ""}`, {
+        headers: authHeader(),
+      }).then((r) => r.json()),
     refetchInterval: 5000,
   });
 
@@ -129,16 +133,30 @@ export default function SystemPage() {
 
         {/* Logs tab */}
         <TabsContent value="logs" className="flex-1 overflow-hidden m-0 flex flex-col">
-          <div className="flex items-center gap-2 px-4 py-2 border-b">
+          <div className="flex items-center gap-2 px-4 py-2 border-b flex-wrap">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/system/logs"] })}
+              onClick={() =>
+                queryClient.invalidateQueries({ queryKey: ["/api/system/logs", logLevel] })
+              }
             >
               <RefreshCw className="w-3 h-3 mr-1" /> Refresh
             </Button>
-            <span className="text-xs text-muted-foreground">
-              Last {logs?.lines.length ?? 0} lines (auto-refreshes every 5s)
+            <div className="flex gap-1">
+              {(["", "INFO", "WARN", "ERROR"] as const).map((level) => (
+                <Button
+                  key={level || "all"}
+                  variant={logLevel === level ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setLogLevel(level)}
+                >
+                  {level || "All"}
+                </Button>
+              ))}
+            </div>
+            <span className="text-xs text-muted-foreground ml-auto">
+              {logs?.lines.length ?? 0} lines (auto-refreshes every 5s)
             </span>
           </div>
           <div className="flex-1 overflow-auto p-4 bg-black/20">
