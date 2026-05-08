@@ -208,4 +208,33 @@ describe("POST /api/naming/preview", () => {
       .send({ template: "A".repeat(201), samples: [] });
     expect(res.status).toBe(400);
   });
+
+  it("rejects template with .. via POST /api/naming/preview", async () => {
+    const res = await request(app)
+      .post("/api/naming/preview")
+      .send({
+        template: "{Title}/../escape",
+        samples: [{ title: "Game", year: 2020 }],
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/path traversal/i);
+  });
+});
+
+describe("PATCH /api/settings — naming field traversal guard", () => {
+  it("rejects folderNamingTemplate with .. via /api/settings", async () => {
+    const res = await request(app)
+      .patch("/api/settings")
+      .send({ folderNamingTemplate: "{Title}/../escape" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/path traversal/i);
+  });
+
+  it("rejects fileNamingTemplate with .. via /api/settings", async () => {
+    const res = await request(app)
+      .patch("/api/settings")
+      .send({ fileNamingTemplate: "{Title}/../escape" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/path traversal/i);
+  });
 });

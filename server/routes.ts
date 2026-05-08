@@ -2619,6 +2619,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate the request body
       const updates = updateUserSettingsSchema.parse(req.body);
 
+      // Guard naming template fields against path traversal
+      if (updates.folderNamingTemplate && !isTemplateSafe(updates.folderNamingTemplate)) {
+        return res.status(400).json({ error: "Invalid template: path traversal detected" });
+      }
+      if (updates.fileNamingTemplate && !isTemplateSafe(updates.fileNamingTemplate)) {
+        return res.status(400).json({ error: "Invalid template: path traversal detected" });
+      }
+
       let settings = await storage.getUserSettings(userId);
 
       if (!settings) {
@@ -2704,6 +2712,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/naming/preview", authenticateToken, async (req, res) => {
     try {
       const { template, samples } = previewRequestSchema.parse(req.body);
+      if (!isTemplateSafe(template)) {
+        return res.status(400).json({ error: "Invalid template: path traversal detected" });
+      }
       const results = previewAll(template, samples as GameContext[]);
       res.json({ results });
     } catch (error) {
