@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage.js";
 import { igdbClient } from "./igdb.js";
-import { db } from "./db.js";
+import { db, pool } from "./db.js";
 import { sql } from "drizzle-orm";
 import {
   insertGameSchema,
@@ -17,6 +17,8 @@ import {
   updateUserSettingsSchema,
   updatePasswordSchema,
   insertRssFeedSchema,
+  insertNotificationConnectorSchema,
+  updateNotificationConnectorSchema,
   type Config,
   type Game,
   type Indexer,
@@ -2653,6 +2655,134 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ ok: true });
     }
   );
+
+  // ─── System ────────────────────────────────────────────────────────────────
+
+  app.get("/api/system/status", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const settings = user?.id ? await storage.getUserSettings(user.id) : null;
+
+      // DB size via raw pragma (pool is the underlying better-sqlite3 instance)
+      const pageCount = (pool.pragma("page_count", { simple: true }) as number) ?? 0;
+      const pageSize = (pool.pragma("page_size", { simple: true }) as number) ?? 4096;
+      const dbSizeBytes = pageCount * pageSize;
+
+      // Downloader health
+      const allDownloaders = await storage.getEnabledDownloaders();
+      const downloaderHealth = await Promise.all(
+        allDownloaders.map(async (d) => {
+          try {
+            const result = await DownloaderManager.testDownloader(d);
+            return { name: d.name, ok: result.success };
+          } catch {
+            return { name: d.name, ok: false };
+          }
+        })
+      );
+
+      res.json({
+        version: process.env.npm_package_version ?? "dev",
+        uptime: Math.floor(process.uptime()),
+        dbSizeBytes,
+        lastAutoSearch: settings?.lastAutoSearch?.getTime() ?? null,
+        downloaderHealth,
+      });
+    } catch (err) {
+      routesLogger.error({ err }, "Failed to get system status");
+      res.status(500).json({ error: "Failed to get system status" });
+    }
+  });
+
+  app.get("/api/system/logs", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const level = String(req.query.level ?? "").toUpperCase();
+      const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit ?? "200"))));
+
+      const logPath = process.env.LOG_FILE;
+      if (!logPath || !fs.existsSync(logPath)) {
+        return res.json({ lines: [] });
+      }
+
+      const content = fs.readFileSync(logPath, "utf-8");
+      let lines = content.split("\n").filter(Boolean);
+      if (level && ["INFO", "WARN", "ERROR", "DEBUG"].includes(level)) {
+        lines = lines.filter((l) => l.toUpperCase().includes(level));
+      }
+      lines = lines.slice(-limit);
+      res.json({ lines });
+    } catch (err) {
+      routesLogger.error({ err }, "Failed to read system logs");
+      res.status(500).json({ error: "Failed to read system logs" });
+    }
+  });
+
+  // ─── Notification Connectors ─────────────────────────────────────────────
+
+  app.get("/api/connectors", authenticateToken, async (_req: Request, res: Response) => {
+    try {
+      res.json(await storage.getConnectors());
+    } catch (err) {
+      routesLogger.error({ err }, "Failed to get connectors");
+      res.status(500).json({ error: "Failed to get connectors" });
+    }
+  });
+
+  app.post("/api/connectors", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const body = insertNotificationConnectorSchema.safeParse(req.body);
+      if (!body.success) {
+        return res.status(400).json({ error: "Invalid request", details: body.error.issues });
+      }
+      const connector = await storage.createConnector(body.data);
+      res.status(201).json(connector);
+    } catch (err) {
+      routesLogger.error({ err }, "Failed to create connector");
+      res.status(500).json({ error: "Failed to create connector" });
+    }
+  });
+
+  app.patch("/api/connectors/:id", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const body = updateNotificationConnectorSchema.safeParse(req.body);
+      if (!body.success) {
+        return res.status(400).json({ error: "Invalid request", details: body.error.issues });
+      }
+      const updated = await storage.updateConnector(req.params.id, body.data);
+      if (!updated) return res.status(404).json({ error: "Connector not found" });
+      res.json(updated);
+    } catch (err) {
+      routesLogger.error({ err }, "Failed to update connector");
+      res.status(500).json({ error: "Failed to update connector" });
+    }
+  });
+
+  app.delete("/api/connectors/:id", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const removed = await storage.deleteConnector(req.params.id);
+      if (!removed) return res.status(404).json({ error: "Connector not found" });
+      res.json({ ok: true });
+    } catch (err) {
+      routesLogger.error({ err }, "Failed to delete connector");
+      res.status(500).json({ error: "Failed to delete connector" });
+    }
+  });
+
+  app.post("/api/connectors/:id/test", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const connector = await storage.getConnector(req.params.id);
+      if (!connector) return res.status(404).json({ error: "Connector not found" });
+      const response = await fetch(connector.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: "test", message: "Gamearr test notification" }),
+        signal: AbortSignal.timeout(5000),
+      });
+      res.json({ ok: response.ok, status: response.status });
+    } catch (err) {
+      res.status(502).json({ ok: false, error: (err as Error).message });
+    }
+  });
 
   // Notification routes
   app.get("/api/notifications", async (req, res) => {
