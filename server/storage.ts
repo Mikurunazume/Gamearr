@@ -1910,8 +1910,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async removeFromBlacklist(id: string): Promise<boolean> {
-    const result = await db.delete(releaseBlacklist).where(eq(releaseBlacklist.id, id));
-    return (result.changes ?? 0) > 0;
+    const [deleted] = await db
+      .delete(releaseBlacklist)
+      .where(eq(releaseBlacklist.id, id))
+      .returning();
+    return !!deleted;
   }
 
   async clearBlacklist(): Promise<void> {
@@ -1966,8 +1969,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteConnector(id: string): Promise<boolean> {
-    const result = await db.delete(notificationConnectors).where(eq(notificationConnectors.id, id));
-    return (result.changes ?? 0) > 0;
+    const [deleted] = await db
+      .delete(notificationConnectors)
+      .where(eq(notificationConnectors.id, id))
+      .returning();
+    return !!deleted;
   }
 
   // Activity query helpers
