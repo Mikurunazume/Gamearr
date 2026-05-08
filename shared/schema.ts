@@ -574,7 +574,9 @@ export const releaseBlacklist = sqliteTable("release_blacklist", {
   gameId: text("game_id").references(() => games.id, { onDelete: "cascade" }),
   releaseName: text("release_name").notNull(),
   reason: text("reason"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).default(
+    sql`(strftime('%s', 'now') * 1000)`
+  ),
 });
 
 export const notificationConnectors = sqliteTable("notification_connectors", {
@@ -584,8 +586,12 @@ export const notificationConnectors = sqliteTable("notification_connectors", {
   url: text("url").notNull(),
   events: text("events", { mode: "json" }).$type<string[]>().notNull(),
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).default(
+    sql`(strftime('%s', 'now') * 1000)`
+  ),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).default(
+    sql`(strftime('%s', 'now') * 1000)`
+  ),
 });
 
 export const insertReleaseBlacklistSchema = createInsertSchema(releaseBlacklist).omit({
@@ -593,6 +599,8 @@ export const insertReleaseBlacklistSchema = createInsertSchema(releaseBlacklist)
   createdAt: true,
 });
 
+// drizzle-zod 0.8.x ships Zod v4 types internally; field-override and merge APIs are
+// incompatible with the project's Zod v3 import. Hand-written schema is the only option.
 export const insertNotificationConnectorSchema = z.object({
   name: z.string(),
   type: z.enum(["discord", "webhook"]),
