@@ -569,6 +569,46 @@ export const rssFeedItems = sqliteTable("rss_feed_items", {
   ),
 });
 
+export const releaseBlacklist = sqliteTable("release_blacklist", {
+  id: text("id").primaryKey(),
+  gameId: text("game_id").references(() => games.id, { onDelete: "cascade" }),
+  releaseName: text("release_name").notNull(),
+  reason: text("reason"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const notificationConnectors = sqliteTable("notification_connectors", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  type: text("type").notNull(), // 'discord' | 'webhook'
+  url: text("url").notNull(),
+  events: text("events", { mode: "json" }).$type<string[]>().notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const insertReleaseBlacklistSchema = createInsertSchema(releaseBlacklist).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertNotificationConnectorSchema = z.object({
+  name: z.string(),
+  type: z.enum(["discord", "webhook"]),
+  url: z.string(),
+  events: z.array(z.enum(["grabbed", "imported", "failed", "released"])),
+  enabled: z.boolean().optional(),
+});
+
+export const updateNotificationConnectorSchema = insertNotificationConnectorSchema.partial();
+
+export type ReleaseBlacklist = typeof releaseBlacklist.$inferSelect;
+export type InsertReleaseBlacklist = (typeof insertReleaseBlacklistSchema)["_output"];
+export type NotificationConnector = typeof notificationConnectors.$inferSelect;
+export type InsertNotificationConnector = (typeof insertNotificationConnectorSchema)["_output"];
+export type UpdateNotificationConnector = (typeof updateNotificationConnectorSchema)["_output"];
+
 export const insertRssFeedSchema = createInsertSchema(rssFeeds).omit({
   id: true,
   createdAt: true,
