@@ -209,16 +209,20 @@ export async function planImport(
   const downloadTitle = options?.downloadTitle;
 
   const ctx = buildGameContext(game, downloadTitle);
-  const targetDirRelative = sanitizeFilename(renderTemplate(folderTemplate, ctx), "windows");
+  let targetDirRelative = sanitizeFilename(renderTemplate(folderTemplate, ctx), "windows");
+  if (!targetDirRelative) {
+    targetDirRelative = downloadTitle ? cleanReleaseName(downloadTitle) : ctx.title;
+  }
   const files = await listFilesRecursively(sourcePath);
 
   const sourceStat = await fs.promises.stat(sourcePath);
   const sourceRoot = sourceStat.isDirectory() ? sourcePath : path.dirname(sourcePath);
 
-  const plan: ImportFilePlan[] = [];
-  for (const f of files) {
-    if (classifyFile(f.absolute) === "ignore") continue;
+  const importableFiles = files.filter((f) => classifyFile(f.absolute) !== "ignore");
+  const isSingleFile = importableFiles.length === 1;
 
+  const plan: ImportFilePlan[] = [];
+  for (const f of importableFiles) {
     let relativeToSource: string;
     if (sourceStat.isFile()) {
       relativeToSource = path.basename(f.absolute);
@@ -228,8 +232,10 @@ export async function planImport(
 
     const ext = path.extname(relativeToSource);
     const subdir = path.dirname(relativeToSource);
-    const renderedStem = sanitizeFilename(renderTemplate(fileTemplate, ctx), "windows");
-    const filename = (renderedStem || path.basename(relativeToSource, ext)) + ext;
+    const filename = isSingleFile
+      ? (sanitizeFilename(renderTemplate(fileTemplate, ctx), "windows") ||
+          path.basename(relativeToSource, ext)) + ext
+      : path.basename(relativeToSource);
     const newRelative = subdir === "." ? filename : path.join(subdir, filename);
 
     plan.push({
