@@ -208,8 +208,8 @@ export async function planImport(
   const fileTemplate = options?.fileTemplate ?? DEFAULT_FILE_TEMPLATE;
   const downloadTitle = options?.downloadTitle;
 
-  const targetDirRelative = renderGameFolderName(game, folderTemplate, downloadTitle);
   const ctx = buildGameContext(game, downloadTitle);
+  const targetDirRelative = sanitizeFilename(renderTemplate(folderTemplate, ctx), "windows");
   const files = await listFilesRecursively(sourcePath);
 
   const sourceStat = await fs.promises.stat(sourcePath);
