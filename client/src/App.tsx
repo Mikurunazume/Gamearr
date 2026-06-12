@@ -71,16 +71,16 @@ function Router() {
           <Redirect to="/settings?tab=sources" />
         </Route>
         <Route path="/indexers">
-          <Redirect to="/settings?tab=indexers" />
+          <Redirect to="/settings?tab=sources" />
         </Route>
         <Route path="/downloaders">
-          <Redirect to="/settings?tab=downloaders" />
+          <Redirect to="/settings?tab=services" />
         </Route>
         <Route path="/root-folders">
-          <Redirect to="/settings?tab=media" />
+          <Redirect to="/settings?tab=media-management" />
         </Route>
         <Route path="/library-scan">
-          <Redirect to="/settings?tab=media" />
+          <Redirect to="/settings?tab=media-management" />
         </Route>
         <Route path="/import-history">
           <Redirect to="/activity/history" />

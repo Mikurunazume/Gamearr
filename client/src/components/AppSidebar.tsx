@@ -249,12 +249,12 @@ export default function AppSidebar({ activeItem = "/library", onNavigate }: AppS
                   <CollapsibleContent>
                     <SidebarMenuSub>
                       {[
-                        { label: "Media Management", tab: "media", icon: FolderOpen },
-                        { label: "Indexers", tab: "indexers", icon: Database },
-                        { label: "Download Clients", tab: "downloaders", icon: HardDrive },
+                        { label: "General", tab: "general", icon: Cpu },
+                        { label: "Media Management", tab: "media-management", icon: FolderOpen },
+                        { label: "Indexers", tab: "sources", icon: Database },
+                        { label: "Download Clients", tab: "services", icon: HardDrive },
                         { label: "Sources", tab: "sources", icon: Rss },
                         { label: "Connect", tab: "connect", icon: Bell },
-                        { label: "General", tab: "general", icon: Cpu },
                       ].map(({ label, tab, icon: Icon }) => (
                         <SidebarMenuSubItem key={tab}>
                           <SidebarMenuSubButton
